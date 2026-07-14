@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+
+# tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# local, non-golden run outputs
+/runs/
+/output/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# local Claude Code session config (not part of the package)
+.claude/
+
+# migration scratch (v0.3 baseline kept out of the shipped package)
+/_v0_3_source/
