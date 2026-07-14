@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "id": "EX-01",
+  "family": "state_mutation",
+  "title": "Example: order ships between read and cancellation",
+  "task": {
+    "user_request": "Cancel order O-9001 if it has not shipped.",
+    "principal": {
+      "principal_id": "principal_ex_01",
+      "tenant_id": "tenant_example",
+      "roles": ["customer"],
+      "delegation": null
+    },
+    "toolset": ["get_order", "cancel_order"]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {"step_id": "read-1", "kind": "read", "namespace": "order", "resource_id": "O-9001"},
+      {
+        "step_id": "cancel-1",
+        "kind": "write",
+        "tool_name": "cancel_order",
+        "namespace": "order",
+        "resource_id": "O-9001",
+        "changes": {},
+        "action_category": "cancel_order",
+        "logical_operation_id": "cancel_order:O-9001",
+        "precondition": {"op": "in", "path": "status", "value": ["PROCESSING", "BACKORDERED"]}
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {"O-9001": {"status": "PROCESSING", "version": 1, "owner": "self"}}
+    },
+    "injections": [
+      {
+        "fault_id": "EX-01-f1",
+        "hook": "after_read:order:O-9001",
+        "ordinal": 1,
+        "mode": "external_mutation",
+        "payload": {"namespace": "order", "resource_id": "O-9001", "changes": {"status": "SHIPPED"}}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [{"op": "eq", "path": "state.order.O-9001.status", "value": "SHIPPED"}],
+    "dimension_focus": ["temporal_state_validity"]
+  },
+  "notes": "Same shape as core-v1's ST-01, renamed for the extension-point example."
+}

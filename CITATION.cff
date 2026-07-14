@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use CAV-Bench, please cite it as below."
+title: "CAV-Bench: Commit-Time Action Validity Benchmark"
+version: 1.0.0
+date-released: "2026-07-14"
+authors:
+  - family-names: "Patel"
+    given-names: "Nixalkumar"
+url: "https://github.com/nixalkumar/cav-bench"
+repository-code: "https://github.com/nixalkumar/cav-bench"
+license: Apache-2.0
+type: software
+keywords:
+  - benchmark
+  - ai-agents
+  - tool-use
+  - reliability
+  - evaluation

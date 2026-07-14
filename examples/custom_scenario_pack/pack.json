@@ -1,0 +1,7 @@
+{
+  "pack_id": "example-pack",
+  "pack_version": "0.1.0",
+  "schema_version": "1.0",
+  "description": "A minimal one-scenario pack demonstrating the scenario-pack extension point.",
+  "scenario_ids": ["EX-01"]
+}
