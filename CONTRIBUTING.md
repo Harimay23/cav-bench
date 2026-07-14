@@ -20,7 +20,7 @@ that touch tooling.
 ## Development setup
 
 ```bash
-git clone https://github.com/nixalkumar/cav-bench
+git clone https://github.com/Harimay23/cav-bench
 cd cav-bench
 python -m venv .venv
 source .venv/bin/activate

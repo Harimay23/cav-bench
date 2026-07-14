@@ -1,0 +1,31 @@
+{
+  "title": "CAV-Bench: Commit-Time Action Validity Benchmark",
+  "description": "A deterministic benchmark for evaluating the gap between successful outcomes and commit-valid execution in tool-using AI-agent systems.",
+  "creators": [
+    {
+      "name": "Patel, Nixalkumar"
+    }
+  ],
+  "license": "Apache-2.0",
+  "upload_type": "software",
+  "access_right": "open",
+  "keywords": [
+    "AI agents",
+    "agent evaluation",
+    "tool use",
+    "agentic AI",
+    "AI safety",
+    "commit-time action validity",
+    "execution integrity",
+    "stateful systems",
+    "benchmark",
+    "reliability"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Harimay23/cav-bench",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

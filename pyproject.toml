@@ -44,8 +44,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nixalkumar/cav-bench"
-Issues = "https://github.com/nixalkumar/cav-bench/issues"
+Homepage = "https://github.com/Harimay23/cav-bench"
+Issues = "https://github.com/Harimay23/cav-bench/issues"
 
 [project.scripts]
 cavbench = "cavbench.cli:main"
