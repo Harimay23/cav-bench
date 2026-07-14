@@ -65,20 +65,37 @@ workflow keeps release actions manual and confirmed.
 
 Reproduce: see `docs/reproducibility.md`.
 
-Full changelog: https://github.com/nixalkumar/cav-bench/compare/vPREV...vX.Y.Z
+Full changelog: https://github.com/Harimay23/cav-bench/compare/vPREV...vX.Y.Z
 ```
 
 ## Publishing (only when explicitly requested)
 
-This project does not auto-publish to PyPI or mint a Zenodo DOI as part of
-the normal release flow (`PRD.md` §4 non-goals). If a maintainer explicitly
-requests it:
+This project does not auto-publish to PyPI as part of the normal release
+flow (`PRD.md` §4 non-goals). If a maintainer explicitly requests it:
 
 ```bash
 python -m build
 python -m twine upload dist/*
 ```
 
-For a Zenodo DOI, use GitHub's Zenodo integration on the tagged release, or
-upload the release tarball manually; update `CITATION.cff` with the minted
-DOI afterward.
+## Zenodo archival
+
+CAV-Bench is archived on Zenodo via GitHub's Zenodo integration
+(zenodo.org/account/settings/github), which mints a new version-specific DOI
+automatically whenever a new GitHub release is published, while the concept
+DOI stays fixed and always resolves to the latest version.
+
+- **Concept DOI** (all versions): `10.5281/zenodo.21364385`
+- **v1.0.0 DOI** (this release, immutable): `10.5281/zenodo.21364386`
+
+After publishing a *future* release once the GitHub-Zenodo integration has
+picked it up and minted a new version DOI:
+
+1. Note the new version-specific DOI Zenodo assigns.
+2. Update `CITATION.cff`'s `version`, `date-released`, and the `identifiers`
+   entry describing the archived release (the concept DOI in `url` does not
+   change).
+3. Update the version-specific DOI and citation text in `README.md`'s
+   Citation section (the concept DOI there does not change either).
+4. Leave `.zenodo.json` as-is unless the project description, license, or
+   keywords changed.

@@ -4,8 +4,11 @@
 
 > CAV-Bench proposes a unified benchmark for measuring the gap between successful outcomes and commit-valid execution across consequential-action failure classes.
 
-[![CI](https://github.com/nixalkumar/cav-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/nixalkumar/cav-bench/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/Harimay23/cav-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/Harimay23/cav-bench/actions/workflows/ci.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21364385.svg)](https://doi.org/10.5281/zenodo.21364385)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
+Created and maintained by Nixalkumar Patel.
 
 ## The problem
 
@@ -88,7 +91,7 @@ This is a controlled ablation demonstrating that the benchmark is sensitive to s
 ## Install
 
 ```bash
-git clone https://github.com/nixalkumar/cav-bench
+git clone https://github.com/Harimay23/cav-bench
 cd cav-bench
 python -m venv .venv
 source .venv/bin/activate
@@ -134,17 +137,34 @@ The adapter and scenario-pack boundaries are stable extension points; neither re
 
 ## Citation
 
-See [`CITATION.cff`](CITATION.cff). If GitHub's "Cite this repository" button isn't convenient:
+CAV-Bench has two distinct DOIs, for two distinct citation needs:
+
+- **Concept DOI** [`10.5281/zenodo.21364385`](https://doi.org/10.5281/zenodo.21364385) identifies the CAV-Bench project across all versions. Use this when referring to CAV-Bench in general — it always resolves to the latest archived release.
+- **Version DOI** [`10.5281/zenodo.21364386`](https://doi.org/10.5281/zenodo.21364386) identifies the exact, immutable `v1.0.0` artifact used to produce the canonical ablation results in this README. Use this when reproducibility of a specific result matters, e.g. citing the numbers in the [ablation table](#controlled-architecture-ablation-not-an-llm-benchmark) above.
+
+For general references to the evolving project, cite the concept DOI:
+
+> https://doi.org/10.5281/zenodo.21364385
+
+For the exact v1.0.0 implementation and canonical ablation results, cite:
+
+> Patel, Nixalkumar. (2026). *CAV-Bench: Commit-Time Action Validity Benchmark* (Version v1.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21364386
 
 ```bibtex
-@software{cavbench2026,
-  title  = {CAV-Bench: Commit-Time Action Validity Benchmark},
-  author = {Patel, Nixalkumar},
-  year   = {2026},
-  url    = {https://github.com/nixalkumar/cav-bench},
-  version = {1.0.0}
+@software{patel_2026_cav_bench,
+  author    = {Patel, Nixalkumar},
+  title     = {CAV-Bench: Commit-Time Action Validity Benchmark},
+  version   = {v1.0.0},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21364386},
+  url       = {https://doi.org/10.5281/zenodo.21364386}
 }
 ```
+
+The exact source archive associated with the canonical v1.0.0 experiment is preserved on Zenodo under DOI [10.5281/zenodo.21364386](https://doi.org/10.5281/zenodo.21364386), independent of any later changes to this repository.
+
+See also [`CITATION.cff`](CITATION.cff), which GitHub's "Cite this repository" button reads automatically.
 
 ## License
 

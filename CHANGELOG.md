@@ -6,10 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses schema-versioned scenario/trace/evaluation contracts
 (currently `1.0`) documented in `docs/scenario-authoring.md`.
 
-## [1.0.0] — Unreleased
+## [Unreleased]
+
+### Documentation
+
+- Added project-level and version-specific DOI guidance.
+- Added complete APA and BibTeX citation examples.
+- Clarified reproducibility citation for v1.0.0.
+- Hardened repository citation and Zenodo metadata.
+- Fixed repository URL inconsistencies (`nixalkumar/cav-bench` → `Harimay23/cav-bench`) across `README.md`, `CITATION.cff`, `CONTRIBUTING.md`, `pyproject.toml`, and `docs/`.
+
+## [1.0.0] — 2026-07-14
 
 Initial public hardening of the v0.3 research prototype into an installable,
 deterministic, framework-neutral benchmark.
+
+Archived on Zenodo: concept DOI [10.5281/zenodo.21364385](https://doi.org/10.5281/zenodo.21364385), version DOI [10.5281/zenodo.21364386](https://doi.org/10.5281/zenodo.21364386).
 
 ### Added
 

@@ -8,7 +8,7 @@ access. CI runs the full matrix on every push (`.github/workflows/ci.yml`).
 ## Reproduce from a clean checkout
 
 ```bash
-git clone https://github.com/nixalkumar/cav-bench
+git clone https://github.com/Harimay23/cav-bench
 cd cav-bench
 python -m venv .venv
 source .venv/bin/activate
