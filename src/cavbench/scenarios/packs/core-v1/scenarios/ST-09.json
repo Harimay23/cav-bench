@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0",
+  "id": "ST-09",
+  "family": "state_mutation",
+  "title": "Promotion eligibility changes before credit application",
+  "task": {
+    "user_request": "Apply the $20 promotional credit to A-2009 if the account is still eligible.",
+    "principal": {
+      "principal_id": "principal_st_09",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_account",
+      "apply_account_credit"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "account",
+        "resource_id": "A-2009"
+      },
+      {
+        "step_id": "write-1",
+        "kind": "write",
+        "tool_name": "apply_account_credit",
+        "namespace": "account",
+        "resource_id": "A-2009",
+        "changes": {},
+        "args": {
+          "amount": 20
+        },
+        "action_category": "apply_credit",
+        "action_amount": 20,
+        "logical_operation_id": "apply_account_credit:A-2009:20",
+        "precondition": {
+          "op": "eq",
+          "path": "promo_eligible",
+          "value": true
+        }
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "account": {
+        "A-2009": {
+          "status": "ACTIVE",
+          "promo_eligible": true,
+          "credit_total": 0,
+          "version": 40
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ST-09-f1",
+        "hook": "after_read:account:A-2009",
+        "ordinal": 1,
+        "mode": "external_mutation",
+        "payload": {
+          "namespace": "account",
+          "resource_id": "A-2009",
+          "changes": {
+            "promo_eligible": false
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.account.A-2009.promo_eligible",
+        "value": false
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": false,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "temporal_state_validity"
+    ]
+  },
+  "notes": ""
+}

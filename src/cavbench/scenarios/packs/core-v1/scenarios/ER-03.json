@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-03",
+  "family": "execution_recovery",
+  "title": "Ambiguous cancellation response requires status check",
+  "task": {
+    "user_request": "Cancel O-4003.",
+    "principal": {
+      "principal_id": "principal_er_03",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_order",
+      "cancel_order",
+      "get_operation_status"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "order",
+        "resource_id": "O-4003"
+      },
+      {
+        "step_id": "write-1",
+        "kind": "write",
+        "tool_name": "cancel_order",
+        "namespace": "order",
+        "resource_id": "O-4003",
+        "changes": {
+          "status": "CANCELLED"
+        },
+        "args": {},
+        "action_category": "cancel_order",
+        "logical_operation_id": "cancel_order:O-4003"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {
+        "O-4003": {
+          "status": "PROCESSING",
+          "version": 19,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-03-f1",
+        "hook": "after_commit_before_response:cancel_order:order:O-4003",
+        "ordinal": 1,
+        "mode": "ambiguous_response",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.order.O-4003.status",
+        "value": "CANCELLED"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

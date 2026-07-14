@@ -157,8 +157,10 @@ class PlannedStep:
     action_scope: Mapping[str, JSONValue] = field(default_factory=dict)
     logical_operation_id: str | None = None
     precondition: Predicate | None = None
+    precondition_scope: str = "gate"
     narrowed: "PlannedStep | None" = None
     compensates: str | None = None
+    compensation_step_id: str | None = None
     depends_on: str | None = None
     trigger: str = "always"
     on_failure: str = "compensate"
@@ -180,8 +182,10 @@ class PlannedStep:
             action_scope=_freeze(data.get("action_scope", {})),
             logical_operation_id=data.get("logical_operation_id"),
             precondition=Predicate.from_dict(precondition) if precondition else None,
+            precondition_scope=data.get("precondition_scope", "gate"),
             narrowed=cls.from_dict(narrowed) if narrowed else None,
             compensates=data.get("compensates"),
+            compensation_step_id=data.get("compensation_step_id"),
             depends_on=data.get("depends_on"),
             trigger=data.get("trigger", "always"),
             on_failure=data.get("on_failure", "compensate"),
@@ -197,6 +201,7 @@ class PlannedStep:
             "action_amount",
             "logical_operation_id",
             "compensates",
+            "compensation_step_id",
             "depends_on",
         ):
             value = getattr(self, attr)
@@ -210,6 +215,8 @@ class PlannedStep:
             payload["action_scope"] = dict(self.action_scope)
         if self.precondition is not None:
             payload["precondition"] = self.precondition.to_dict()
+            if self.precondition_scope != "gate":
+                payload["precondition_scope"] = self.precondition_scope
         if self.narrowed is not None:
             payload["narrowed"] = self.narrowed.to_dict()
         if self.trigger != "always":

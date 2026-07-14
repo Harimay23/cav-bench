@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cav-bench.dev/schemas/evaluation-v1.schema.json",
+  "title": "CAV-Bench Evaluation Result (schema_version 1.0)",
+  "type": "object",
+  "required": [
+    "scenario_id", "outcome_success", "policy_aware_outcome_success",
+    "commit_valid_success", "dimensions", "invalid_commits", "failure_codes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": { "type": "string" },
+    "outcome_success": { "type": "boolean" },
+    "policy_aware_outcome_success": { "type": "boolean" },
+    "commit_valid_success": { "type": "boolean" },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intent_grounding": { "enum": ["pass", "fail", "not_applicable"] },
+        "authority_validity": { "enum": ["pass", "fail", "not_applicable"] },
+        "temporal_state_validity": { "enum": ["pass", "fail", "not_applicable"] },
+        "execution_integrity": { "enum": ["pass", "fail", "not_applicable"] },
+        "outcome_recoverability": { "enum": ["pass", "fail", "not_applicable"] }
+      }
+    },
+    "invalid_commits": { "type": "array", "items": { "type": "object" } },
+    "failure_codes": { "type": "array", "items": { "type": "string" } },
+    "diagnostics": { "type": "object" }
+  }
+}

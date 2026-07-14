@@ -19,6 +19,7 @@ from typing import Mapping
 from cavbench.errors import ResourceNotFound
 from cavbench.errors import VersionConflict as VersionConflictError
 from cavbench.scenarios.models import JSONValue
+from cavbench.util import thaw
 
 
 @dataclass(frozen=True)
@@ -29,10 +30,14 @@ class MutationResult:
 
 class VersionedStateStore:
     def __init__(self, initial_state: Mapping[str, Mapping[str, Mapping[str, JSONValue]]]) -> None:
+        # `initial_state` may hold immutable (MappingProxyType) containers
+        # from the frozen scenario domain model; `thaw` rebuilds plain,
+        # independently-mutable dicts rather than relying on `copy.deepcopy`,
+        # which cannot pickle `mappingproxy` on some Python versions.
         self._resources: dict[tuple[str, str], dict[str, JSONValue]] = {}
         for namespace, bucket in initial_state.items():
             for resource_id, fields in bucket.items():
-                self._resources[(namespace, str(resource_id))] = deepcopy(dict(fields))
+                self._resources[(namespace, str(resource_id))] = thaw(fields)
 
     def exists(self, namespace: str, resource_id: str) -> bool:
         return (namespace, str(resource_id)) in self._resources
@@ -65,7 +70,7 @@ class VersionedStateStore:
                 f"Expected {namespace}:{resource_id} version {expected_version}, found {current_version}"
             )
         for path, value in changes.items():
-            self._set_path(resource, path, value)
+            self._set_path(resource, path, thaw(value))
         if isinstance(current_version, int):
             resource["version"] = current_version + 1
         return MutationResult(before=before, after=deepcopy(resource))

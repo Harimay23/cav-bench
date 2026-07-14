@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cav-bench.dev/schemas/trace-v1.schema.json",
+  "title": "CAV-Bench Episode Trace (schema_version 1.0)",
+  "type": "object",
+  "required": ["schema_version", "scenario_id", "run_id", "seed", "events", "final_state", "side_effects"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "scenario_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "seed": { "type": "integer" },
+    "adapter_name": { "type": "string" },
+    "adapter_version": { "type": "string" },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["seq", "logical_time", "event_type", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "seq": { "type": "integer", "minimum": 0 },
+          "logical_time": { "type": "integer" },
+          "event_type": {
+            "enum": [
+              "user_input", "tool_read", "external_mutation", "tool_call_attempt",
+              "commit_rejected", "side_effect_commit", "operation_status_read",
+              "retry", "compensation_attempt", "compensation_result",
+              "clarification", "escalation", "agent_message", "fault", "run_error"
+            ]
+          },
+          "source": { "type": "string" },
+          "tool_name": { "type": ["string", "null"] },
+          "args": { "type": ["object", "null"] },
+          "resource_refs": { "type": "array", "items": { "type": "string" } },
+          "versions_before": { "type": "object" },
+          "versions_after": { "type": "object" },
+          "logical_operation_id": { "type": ["string", "null"] },
+          "idempotency_key": { "type": ["string", "null"] },
+          "response_status": { "type": ["string", "null"] },
+          "fault_id": { "type": ["string", "null"] },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+    "final_state": { "type": "object" },
+    "side_effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["effect_id", "seq", "effect_type", "logical_operation_id", "resource_ref"],
+        "properties": {
+          "effect_id": { "type": "string" },
+          "seq": { "type": "integer" },
+          "effect_type": { "type": "string" },
+          "logical_operation_id": { "type": "string" },
+          "idempotency_key": { "type": ["string", "null"] },
+          "resource_ref": { "type": "string" },
+          "payload": { "type": "object" },
+          "compensation_for": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "adapter_report": {
+      "type": "object",
+      "description": "Untrusted, adapter-supplied. Never a source of pass/fail truth.",
+      "properties": {
+        "final_message": { "type": "string" },
+        "completion_status": { "enum": ["success", "partial", "pending_recovery", "failed"] }
+      }
+    }
+  }
+}

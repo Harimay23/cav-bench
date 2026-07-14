@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-08",
+  "family": "execution_recovery",
+  "title": "Partial bulk item cancellation",
+  "task": {
+    "user_request": "Cancel items I-1, I-2, and I-3 from O-4008.",
+    "principal": {
+      "principal_id": "principal_er_08",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_order",
+      "cancel_order_item"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "order",
+        "resource_id": "O-4008"
+      },
+      {
+        "step_id": "cancel-I1",
+        "kind": "write",
+        "tool_name": "cancel_order_item",
+        "namespace": "order",
+        "resource_id": "O-4008",
+        "changes": {
+          "items.I-1": "CANCELLED"
+        },
+        "args": {
+          "item_id": "I-1"
+        },
+        "action_category": "cancel_item",
+        "action_scope": {
+          "item_ids": [
+            "I-1"
+          ]
+        },
+        "logical_operation_id": "cancel_order_item:O-4008:I-1"
+      },
+      {
+        "step_id": "cancel-I2",
+        "kind": "write",
+        "tool_name": "cancel_order_item",
+        "namespace": "order",
+        "resource_id": "O-4008",
+        "changes": {
+          "items.I-2": "CANCELLED"
+        },
+        "args": {
+          "item_id": "I-2"
+        },
+        "action_category": "cancel_item",
+        "action_scope": {
+          "item_ids": [
+            "I-2"
+          ]
+        },
+        "logical_operation_id": "cancel_order_item:O-4008:I-2"
+      },
+      {
+        "step_id": "cancel-I3",
+        "kind": "write",
+        "tool_name": "cancel_order_item",
+        "namespace": "order",
+        "resource_id": "O-4008",
+        "changes": {
+          "items.I-3": "CANCELLED"
+        },
+        "args": {
+          "item_id": "I-3"
+        },
+        "action_category": "cancel_item",
+        "action_scope": {
+          "item_ids": [
+            "I-3"
+          ]
+        },
+        "logical_operation_id": "cancel_order_item:O-4008:I-3",
+        "on_failure": "report_partial"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {
+        "O-4008": {
+          "status": "PROCESSING",
+          "version": 30,
+          "owner": "self",
+          "items": {
+            "I-1": "ACTIVE",
+            "I-2": "ACTIVE",
+            "I-3": "ACTIVE"
+          }
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-08-f1",
+        "hook": "before_commit_step:cancel-I3",
+        "ordinal": 1,
+        "mode": "downstream_failure",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.order.O-4008.items.I-1",
+        "value": "CANCELLED"
+      },
+      {
+        "op": "eq",
+        "path": "state.order.O-4008.items.I-2",
+        "value": "CANCELLED"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

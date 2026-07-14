@@ -1,0 +1,150 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-06",
+  "family": "execution_recovery",
+  "title": "OMS address update succeeds but carrier update fails",
+  "task": {
+    "user_request": "Change the delivery address for O-4006 to 77 Hill St everywhere it is needed.",
+    "principal": {
+      "principal_id": "principal_er_06",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_order",
+      "change_shipping_address",
+      "get_carrier_status",
+      "update_carrier_address"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-order-1",
+        "kind": "read",
+        "namespace": "order",
+        "resource_id": "O-4006"
+      },
+      {
+        "step_id": "addr-1",
+        "kind": "write",
+        "tool_name": "change_shipping_address",
+        "namespace": "order",
+        "resource_id": "O-4006",
+        "changes": {
+          "address": "77 Hill St"
+        },
+        "args": {
+          "new_address": "77 Hill St"
+        },
+        "action_category": "change_address",
+        "logical_operation_id": "change_shipping_address:O-4006"
+      },
+      {
+        "step_id": "carrier-1",
+        "kind": "write",
+        "tool_name": "update_carrier_address",
+        "namespace": "carrier",
+        "resource_id": "C-4006",
+        "changes": {
+          "address": "77 Hill St"
+        },
+        "action_category": "update_carrier_address",
+        "logical_operation_id": "update_carrier_address:C-4006",
+        "depends_on": "addr-1",
+        "trigger": "on_dependency_success",
+        "on_failure": "compensate",
+        "compensation_step_id": "revert-addr-1"
+      },
+      {
+        "step_id": "revert-addr-1",
+        "kind": "compensate",
+        "tool_name": "change_shipping_address",
+        "namespace": "order",
+        "resource_id": "O-4006",
+        "changes": {
+          "address": "10 Main St"
+        },
+        "args": {
+          "new_address": "10 Main St"
+        },
+        "action_category": "change_address",
+        "logical_operation_id": "change_shipping_address_revert:O-4006",
+        "compensates": "addr-1"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {
+        "O-4006": {
+          "address": "10 Main St",
+          "version": 22,
+          "owner": "self"
+        }
+      },
+      "carrier": {
+        "C-4006": {
+          "address": "10 Main St",
+          "status": "PENDING",
+          "version": 1
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-06-f1",
+        "hook": "before_commit_step:carrier-1",
+        "ordinal": 1,
+        "mode": "downstream_failure",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "exists",
+        "path": "state.order.O-4006"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [
+      {
+        "op": "any",
+        "predicates": [
+          {
+            "op": "eq",
+            "path": "state.order.O-4006.address",
+            "value": "10 Main St"
+          },
+          {
+            "op": "count_gte",
+            "collection": "side_effects",
+            "where": {
+              "effect_type": "escalate_case"
+            },
+            "value": 1
+          }
+        ],
+        "dimension": "outcome_recoverability",
+        "failure_code": "OR_COMPENSATION_MISSING",
+        "description": "order address must be reverted to match carrier, or escalated, when the carrier update fails"
+      }
+    ],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

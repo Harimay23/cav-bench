@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cav-bench.dev/schemas/scenario-v1.schema.json",
+  "title": "CAV-Bench Scenario (schema_version 1.0)",
+  "type": "object",
+  "required": ["schema_version", "id", "family", "title", "task", "world", "oracle"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "id": { "type": "string", "minLength": 1 },
+    "family": {
+      "enum": ["stable_happy_path", "state_mutation", "intent_authority", "execution_recovery"]
+    },
+    "title": { "type": "string" },
+    "notes": { "type": "string" },
+    "task": {
+      "type": "object",
+      "required": ["user_request", "principal", "toolset"],
+      "additionalProperties": false,
+      "properties": {
+        "user_request": { "type": "string" },
+        "principal": {
+          "type": "object",
+          "required": ["principal_id", "tenant_id"],
+          "additionalProperties": false,
+          "properties": {
+            "principal_id": { "type": "string" },
+            "tenant_id": { "type": "string" },
+            "roles": { "type": "array", "items": { "type": "string" } },
+            "delegation": { "type": ["object", "null"] }
+          }
+        },
+        "toolset": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requested_intent": { "type": "array", "items": { "type": "string" } },
+        "allowed_scope": { "type": "object" },
+        "ambiguous_reference": { "type": "boolean" },
+        "candidate_resources": { "type": "array", "items": { "type": "string" } },
+        "on_block": { "enum": ["refuse", "escalate", "clarify", "respond_only"] }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/planned_step" } }
+      }
+    },
+    "world": {
+      "type": "object",
+      "required": ["initial_state"],
+      "additionalProperties": false,
+      "properties": {
+        "initial_state": { "type": "object" },
+        "injections": { "type": "array", "items": { "$ref": "#/$defs/injection" } }
+      }
+    },
+    "oracle": {
+      "type": "object",
+      "required": ["goal_predicates"],
+      "additionalProperties": false,
+      "properties": {
+        "goal_predicates": { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "forbidden_effects": { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "required_effects": { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "policy_constraints": { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "recovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required": { "type": "boolean" },
+            "obligations": { "type": "array", "items": { "$ref": "#/$defs/predicate" } }
+          }
+        },
+        "dimension_focus": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "intent_grounding",
+              "authority_validity",
+              "temporal_state_validity",
+              "execution_integrity",
+              "outcome_recoverability"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "predicate": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in",
+            "exists", "not_exists", "count_eq", "count_lte", "count_gte",
+            "all", "any", "not"
+          ]
+        },
+        "path": { "type": "string" },
+        "value": {},
+        "collection": { "type": "string" },
+        "where": { "type": "object" },
+        "predicates": { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "description": { "type": "string" },
+        "dimension": { "type": "string" },
+        "failure_code": { "type": "string" }
+      }
+    },
+    "planned_step": {
+      "type": "object",
+      "required": ["step_id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "step_id": { "type": "string" },
+        "kind": { "enum": ["read", "write", "escalate", "clarify", "status_check", "compensate", "respond"] },
+        "tool_name": { "type": "string" },
+        "namespace": { "type": "string" },
+        "resource_id": { "type": "string" },
+        "changes": { "type": "object" },
+        "args": { "type": "object" },
+        "action_category": { "type": "string" },
+        "action_amount": { "type": ["number", "null"] },
+        "action_scope": { "type": "object" },
+        "logical_operation_id": { "type": "string" },
+        "precondition": { "$ref": "#/$defs/predicate" },
+        "precondition_scope": { "enum": ["gate", "always"] },
+        "narrowed": { "$ref": "#/$defs/planned_step" },
+        "compensates": { "type": "string" },
+        "compensation_step_id": { "type": "string" },
+        "depends_on": { "type": "string" },
+        "trigger": { "enum": ["always", "on_dependency_success", "on_dependency_failure"] },
+        "on_failure": { "enum": ["compensate", "escalate", "report_partial"] }
+      }
+    },
+    "injection": {
+      "type": "object",
+      "required": ["fault_id", "hook", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "fault_id": { "type": "string" },
+        "hook": { "type": "string" },
+        "ordinal": { "type": "integer" },
+        "mode": {
+          "enum": ["external_mutation", "ambiguous_response", "downstream_failure", "compensation_failure"]
+        },
+        "payload": { "type": "object" }
+      }
+    }
+  }
+}

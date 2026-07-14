@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-09",
+  "family": "execution_recovery",
+  "title": "Compensation attempt also fails",
+  "task": {
+    "user_request": "Reserve SKU-4009 only as part of a successful purchase.",
+    "principal": {
+      "principal_id": "principal_er_09",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_inventory",
+      "reserve_inventory",
+      "capture_payment",
+      "release_inventory",
+      "escalate_case"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "inventory",
+        "resource_id": "SKU-4009"
+      },
+      {
+        "step_id": "reserve-1",
+        "kind": "write",
+        "tool_name": "reserve_inventory",
+        "namespace": "inventory",
+        "resource_id": "SKU-4009",
+        "changes": {
+          "available": 0,
+          "reservation_state": "HELD"
+        },
+        "args": {
+          "qty": 1
+        },
+        "action_category": "reserve_inventory",
+        "action_amount": 1,
+        "logical_operation_id": "reserve_inventory:SKU-4009:1"
+      },
+      {
+        "step_id": "capture-1",
+        "kind": "write",
+        "tool_name": "capture_payment",
+        "namespace": "payment",
+        "resource_id": "P-4009",
+        "changes": {
+          "status": "CAPTURED"
+        },
+        "args": {
+          "amount": 100
+        },
+        "action_category": "capture_payment",
+        "logical_operation_id": "capture_payment:P-4009",
+        "depends_on": "reserve-1",
+        "trigger": "on_dependency_success",
+        "on_failure": "compensate",
+        "compensation_step_id": "release-1"
+      },
+      {
+        "step_id": "release-1",
+        "kind": "compensate",
+        "tool_name": "release_inventory",
+        "namespace": "inventory",
+        "resource_id": "SKU-4009",
+        "changes": {
+          "available": 1,
+          "reservation_state": "RELEASED"
+        },
+        "action_category": "release_inventory",
+        "logical_operation_id": "release_inventory:SKU-4009",
+        "compensates": "reserve-1"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "inventory": {
+        "SKU-4009": {
+          "available": 1,
+          "version": 50,
+          "reservation_state": "NONE"
+        }
+      },
+      "payment": {
+        "P-4009": {
+          "status": "READY",
+          "version": 8
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-09-f1",
+        "hook": "after_commit_step:reserve-1",
+        "ordinal": 1,
+        "mode": "downstream_failure",
+        "payload": {
+          "affects_step": "capture-1"
+        }
+      },
+      {
+        "fault_id": "ER-09-f2",
+        "hook": "before_commit_step:release-1",
+        "ordinal": 1,
+        "mode": "compensation_failure",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.inventory.SKU-4009.reservation_state",
+        "value": "HELD"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [
+      {
+        "op": "count_gte",
+        "collection": "side_effects",
+        "where": {
+          "effect_type": "escalate_case"
+        },
+        "value": 1,
+        "dimension": "outcome_recoverability",
+        "failure_code": "OR_ESCALATION_MISSING"
+      }
+    ],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

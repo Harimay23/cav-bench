@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-05",
+  "family": "execution_recovery",
+  "title": "Cancellation commits but refund fails",
+  "task": {
+    "user_request": "Cancel O-4005 and refund the $80 payment.",
+    "principal": {
+      "principal_id": "principal_er_05",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_order",
+      "cancel_order",
+      "get_payment",
+      "issue_refund",
+      "escalate_case"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-order-1",
+        "kind": "read",
+        "namespace": "order",
+        "resource_id": "O-4005"
+      },
+      {
+        "step_id": "cancel-1",
+        "kind": "write",
+        "tool_name": "cancel_order",
+        "namespace": "order",
+        "resource_id": "O-4005",
+        "changes": {
+          "status": "CANCELLED"
+        },
+        "action_category": "cancel_order",
+        "logical_operation_id": "cancel_order:O-4005"
+      },
+      {
+        "step_id": "refund-1",
+        "kind": "write",
+        "tool_name": "issue_refund",
+        "namespace": "payment",
+        "resource_id": "P-4005",
+        "changes": {
+          "refunded": 80
+        },
+        "args": {
+          "amount": 80
+        },
+        "action_category": "refund",
+        "action_amount": 80,
+        "logical_operation_id": "issue_refund:P-4005:80",
+        "depends_on": "cancel-1",
+        "trigger": "on_dependency_success",
+        "on_failure": "escalate"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {
+        "O-4005": {
+          "status": "PROCESSING",
+          "version": 5,
+          "owner": "self"
+        }
+      },
+      "payment": {
+        "P-4005": {
+          "captured": 80,
+          "refunded": 0,
+          "version": 9,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-05-f1",
+        "hook": "before_commit_step:refund-1",
+        "ordinal": 1,
+        "mode": "downstream_failure",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "exists",
+        "path": "state.order.O-4005"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [
+      {
+        "op": "count_gte",
+        "collection": "side_effects",
+        "where": {
+          "effect_type": "cancel_order",
+          "resource_ref": "order:O-4005"
+        },
+        "value": 1
+      },
+      {
+        "op": "count_gte",
+        "collection": "side_effects",
+        "where": {
+          "effect_type": "escalate_case"
+        },
+        "value": 1,
+        "dimension": "outcome_recoverability",
+        "failure_code": "OR_ESCALATION_MISSING"
+      }
+    ],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

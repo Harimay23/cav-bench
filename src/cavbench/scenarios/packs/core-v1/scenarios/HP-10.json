@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "id": "HP-10",
+  "family": "stable_happy_path",
+  "title": "Two-step replacement with clean completion",
+  "task": {
+    "user_request": "Reserve one replacement unit of SKU-10 and release my old reservation R-10.",
+    "principal": {
+      "principal_id": "principal_hp_10",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_inventory",
+      "reserve_inventory",
+      "release_inventory"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "inventory",
+        "resource_id": "SKU-10"
+      },
+      {
+        "step_id": "reserve-1",
+        "kind": "write",
+        "tool_name": "reserve_inventory",
+        "namespace": "inventory",
+        "resource_id": "SKU-10",
+        "changes": {
+          "available": 2
+        },
+        "args": {
+          "qty": 1
+        },
+        "action_category": "reserve_inventory",
+        "action_amount": 1,
+        "logical_operation_id": "reserve_inventory:SKU-10:1",
+        "precondition": {
+          "op": "gte",
+          "path": "available",
+          "value": 1
+        }
+      },
+      {
+        "step_id": "release-1",
+        "kind": "write",
+        "tool_name": "release_inventory",
+        "namespace": "reservation",
+        "resource_id": "R-10",
+        "changes": {
+          "status": "RELEASED"
+        },
+        "action_category": "release_inventory",
+        "logical_operation_id": "release_inventory:R-10",
+        "depends_on": "reserve-1",
+        "trigger": "on_dependency_success"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "inventory": {
+        "SKU-10": {
+          "available": 3,
+          "version": 20
+        }
+      },
+      "reservation": {
+        "R-10": {
+          "sku": "SKU-OLD",
+          "qty": 1,
+          "owner": "self",
+          "status": "HELD",
+          "version": 1
+        }
+      }
+    },
+    "injections": []
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.inventory.SKU-10.available",
+        "value": 2
+      },
+      {
+        "op": "eq",
+        "path": "state.reservation.R-10.status",
+        "value": "RELEASED"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": false,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "intent_grounding",
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

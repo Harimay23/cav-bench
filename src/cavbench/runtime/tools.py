@@ -26,7 +26,9 @@ TOOL_EFFECT_TYPE: dict[str, str] = {
     "apply_account_credit": "apply_credit",
     "book_service_slot": "book_slot",
     "export_customer_data": "export_customer_data",
-    "compensating_action": "compensate",
+    "capture_payment": "capture_payment",
+    "update_carrier_address": "update_carrier_address",
+    "escalate_case": "escalate_case",
 }
 
 READ_TOOLS: dict[str, str] = {

@@ -70,7 +70,10 @@ class BenchmarkEnvironment:
                 metadata={"changes": dict(changes)},
             )
         elif injection.mode in ("downstream_failure", "compensation_failure"):
-            affected_step = injection.payload["affects_step"]
+            # `affects_step` lets an earlier step's completion sabotage a
+            # later one; when omitted, the hook is step-scoped
+            # ("before_commit_step:<step_id>") and targets itself.
+            affected_step = injection.payload.get("affects_step") or injection.hook.split(":", 1)[1]
             self._forced_failures[affected_step] = injection.mode
             self._record(
                 "fault",
@@ -119,6 +122,20 @@ class BenchmarkEnvironment:
         args = dict(args or {})
         resource_ref = f"{namespace}:{resource_id}"
 
+        before = self.state.get(namespace, resource_id)
+        self._record(
+            "tool_call_attempt",
+            tool_name=tool_name,
+            args=args,
+            resource_refs=[resource_ref],
+            versions_before={resource_ref: before.get("version")},
+            logical_operation_id=logical_operation_id,
+            idempotency_key=idempotency_key,
+        )
+
+        self._fire(f"before_commit_step:{step_id}")
+        self._fire(f"before_commit:{tool_name}:{namespace}:{resource_id}")
+
         if step_id in self._forced_failures:
             reason = self._forced_failures.pop(step_id)
             self._record(
@@ -133,18 +150,6 @@ class BenchmarkEnvironment:
             )
             return {"status": "FAILED", "committed": False}
 
-        before = self.state.get(namespace, resource_id)
-        self._record(
-            "tool_call_attempt",
-            tool_name=tool_name,
-            args=args,
-            resource_refs=[resource_ref],
-            versions_before={resource_ref: before.get("version")},
-            logical_operation_id=logical_operation_id,
-            idempotency_key=idempotency_key,
-        )
-
-        self._fire(f"before_commit:{tool_name}:{namespace}:{resource_id}")
         current = self.state.get(namespace, resource_id)
         current_version = current.get("version")
 
@@ -202,6 +207,7 @@ class BenchmarkEnvironment:
             metadata={"effect_id": effect.effect_id, "effect_type": effect_type},
         )
 
+        self._fire(f"after_commit_step:{step_id}")
         self._fire(f"after_commit:{tool_name}:{namespace}:{resource_id}")
         ambiguous = bool(self._fire(f"after_commit_before_response:{tool_name}:{namespace}:{resource_id}"))
         if ambiguous:

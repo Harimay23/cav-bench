@@ -19,7 +19,14 @@ from cavbench.evaluation.predicates import evaluate as evaluate_predicate
 from cavbench.runtime.session import AdapterSession
 from cavbench.scenarios.models import JSONValue, PlannedStep
 
-MAX_WRITE_ATTEMPTS = 2
+# A commit-time guard's CONFLICT-driven re-read/retry and an ambiguous
+# response's reconciliation-driven retry share this same attempt budget.
+# It must be generous enough that a guard-only profile (commit_time_state_guard
+# without idempotency_reconciliation) can fully play out: retry once for a
+# spurious conflict caused by its own earlier attempt already having
+# committed, *and then* naively resubmit with a fresh key -- which is exactly
+# the duplicate this profile tier is not equipped to avoid.
+MAX_WRITE_ATTEMPTS = 4
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,7 @@ class _Run:
         self._status: dict[str, str] = {}
         self._notes: list[str] = []
         self._worst = "success"  # success > partial > pending_recovery > failed (severity order below)
+        self._observed: dict[tuple[str, str], dict[str, JSONValue]] = {}
 
     _SEVERITY = {"success": 0, "partial": 1, "pending_recovery": 2, "failed": 3}
 
@@ -78,7 +86,7 @@ class _Run:
                     continue
 
             if step.kind == "read":
-                self._read(step.namespace, step.resource_id)
+                self._read_cached(step.namespace, step.resource_id)
                 self._status[step.step_id] = "committed"
             elif step.kind == "write":
                 self._status[step.step_id] = self._write_step(step)
@@ -107,10 +115,27 @@ class _Run:
         return "Request could not be completed."
 
     def _read(self, namespace: str | None, resource_id: str | None) -> dict[str, JSONValue]:
+        """Always performs a fresh read. Use for re-observing state after a
+        conflict or before acting on a narrowed/alternate target -- callers
+        that need the current truth, not a cached prior observation."""
         assert namespace is not None and resource_id is not None
         result = self._session.tools.read(namespace, resource_id)
         assert result.data is not None
-        return dict(result.data)
+        value = dict(result.data)
+        self._observed[(namespace, resource_id)] = value
+        return value
+
+    def _read_cached(self, namespace: str | None, resource_id: str | None) -> dict[str, JSONValue]:
+        """Reuses this episode's most recent observation of a resource
+        instead of re-reading it. A competent execution strategy does not
+        re-fetch data it already has in hand; re-reading here would silently
+        observe any hazard that fired on the first read and mask exactly the
+        staleness this benchmark exists to detect."""
+        assert namespace is not None and resource_id is not None
+        key = (namespace, resource_id)
+        if key in self._observed:
+            return self._observed[key]
+        return self._read(namespace, resource_id)
 
     # -- policy gate ----------------------------------------------------
 
@@ -123,7 +148,11 @@ class _Run:
             reasons.append("ambiguous_reference")
         if step.action_category and policy.requested_intent and step.action_category not in policy.requested_intent:
             reasons.append("intent_mismatch")
-        if step.precondition is not None and not evaluate_predicate(step.precondition, observed):
+        if (
+            step.precondition is not None
+            and step.precondition_scope == "gate"
+            and not evaluate_predicate(step.precondition, observed)
+        ):
             reasons.append("precondition_failed")
 
         scope_violation = False
@@ -151,8 +180,11 @@ class _Run:
         if not reasons:
             return step, None
 
-        narrowable = {"scope_violation", "authority_violation", "tenant_violation", "delegation_limit"}
-        if step.narrowed is not None and set(reasons) <= narrowable:
+        # A narrowed alternative is only ever declared by a scenario when a
+        # legitimate corrective action exists, so its presence is sufficient
+        # to prefer it over an outright block, regardless of which specific
+        # check produced the violation.
+        if step.narrowed is not None:
             return step.narrowed, None
         return None, reasons[0]
 
@@ -172,8 +204,18 @@ class _Run:
 
     def _write_step(self, step: PlannedStep) -> str:
         assert step.namespace is not None and step.resource_id is not None
-        observed = self._read(step.namespace, step.resource_id)
+        observed = self._read_cached(step.namespace, step.resource_id)
         acting_step = step
+
+        # Universal, capability-independent no-op check: any competent
+        # execution strategy avoids re-attempting an action that is already
+        # satisfied or inapplicable given what it just observed. This is
+        # distinct from the intent/authority gate below, which requires the
+        # intent_authority_gate capability.
+        if step.precondition is not None and step.precondition_scope == "always":
+            if not evaluate_predicate(step.precondition, observed):
+                self._notes.append(f"{step.step_id} is a no-op given current state; skipping")
+                return "blocked"
 
         if self._caps.intent_authority_gate:
             acting_step_or_none, reason = self._apply_policy_gate(step, observed)
@@ -245,7 +287,12 @@ class _Run:
             self._downgrade("pending_recovery")
             return "pending_recovery"
 
-        comp_step = next((s for s in self._plan.steps if s.compensates == step.step_id), None)
+        comp_step = None
+        if step.compensation_step_id:
+            try:
+                comp_step = self._plan.step(step.compensation_step_id)
+            except KeyError:
+                comp_step = None
         if comp_step is None:
             self._session.escalate(f"{step.step_id} failed and cannot be compensated")
             self._downgrade("pending_recovery")

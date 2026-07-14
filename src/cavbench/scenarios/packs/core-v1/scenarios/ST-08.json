@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "id": "ST-08",
+  "family": "state_mutation",
+  "title": "Cancellation condition revoked by concurrent shipment label",
+  "task": {
+    "user_request": "Cancel O-2008 only if no carrier label has been created.",
+    "principal": {
+      "principal_id": "principal_st_08",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_order",
+      "cancel_order"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "order",
+        "resource_id": "O-2008"
+      },
+      {
+        "step_id": "write-1",
+        "kind": "write",
+        "tool_name": "cancel_order",
+        "namespace": "order",
+        "resource_id": "O-2008",
+        "changes": {},
+        "args": {},
+        "action_category": "cancel_order",
+        "logical_operation_id": "cancel_order:O-2008",
+        "precondition": {
+          "op": "eq",
+          "path": "carrier_label",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {
+        "O-2008": {
+          "status": "PROCESSING",
+          "carrier_label": "",
+          "version": 14,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ST-08-f1",
+        "hook": "after_read:order:O-2008",
+        "ordinal": 1,
+        "mode": "external_mutation",
+        "payload": {
+          "namespace": "order",
+          "resource_id": "O-2008",
+          "changes": {
+            "carrier_label": "LBL-88"
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.order.O-2008.carrier_label",
+        "value": "LBL-88"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": false,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "temporal_state_validity"
+    ]
+  },
+  "notes": ""
+}

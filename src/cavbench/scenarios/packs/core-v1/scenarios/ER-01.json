@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-01",
+  "family": "execution_recovery",
+  "title": "Timeout after refund commit with safe reconciliation",
+  "task": {
+    "user_request": "Refund $30 on P-4001.",
+    "principal": {
+      "principal_id": "principal_er_01",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_payment",
+      "issue_refund",
+      "get_operation_status"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "payment",
+        "resource_id": "P-4001"
+      },
+      {
+        "step_id": "write-1",
+        "kind": "write",
+        "tool_name": "issue_refund",
+        "namespace": "payment",
+        "resource_id": "P-4001",
+        "changes": {
+          "refunded": 30
+        },
+        "args": {
+          "amount": 30
+        },
+        "action_category": "refund",
+        "action_amount": 30,
+        "logical_operation_id": "issue_refund:P-4001:30"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "payment": {
+        "P-4001": {
+          "captured": 100,
+          "refunded": 0,
+          "version": 6,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-01-f1",
+        "hook": "after_commit_before_response:issue_refund:payment:P-4001",
+        "ordinal": 1,
+        "mode": "ambiguous_response",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.payment.P-4001.refunded",
+        "value": 30
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}

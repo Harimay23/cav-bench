@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "id": "ER-07",
+  "family": "execution_recovery",
+  "title": "Parallel duplicate refund race",
+  "task": {
+    "user_request": "Refund $25 on P-4007.",
+    "principal": {
+      "principal_id": "principal_er_07",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_payment",
+      "issue_refund",
+      "get_operation_status"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "payment",
+        "resource_id": "P-4007"
+      },
+      {
+        "step_id": "write-1",
+        "kind": "write",
+        "tool_name": "issue_refund",
+        "namespace": "payment",
+        "resource_id": "P-4007",
+        "changes": {
+          "refunded": 25
+        },
+        "args": {
+          "amount": 25
+        },
+        "action_category": "refund",
+        "action_amount": 25,
+        "logical_operation_id": "issue_refund:P-4007:25"
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "payment": {
+        "P-4007": {
+          "captured": 100,
+          "refunded": 0,
+          "version": 1,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "ER-07-f1",
+        "hook": "after_commit_before_response:issue_refund:payment:P-4007",
+        "ordinal": 1,
+        "mode": "ambiguous_response",
+        "payload": {}
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.payment.P-4007.refunded",
+        "value": 25
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": true,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "execution_integrity",
+      "outcome_recoverability"
+    ]
+  },
+  "notes": ""
+}
