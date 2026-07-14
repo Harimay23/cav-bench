@@ -10,7 +10,7 @@ codebase.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from cavbench.scenarios.models import JSONValue, Predicate
 
@@ -58,10 +58,10 @@ def evaluate(predicate: Predicate, context: Mapping[str, JSONValue]) -> bool:
         assert predicate.collection is not None
         count = _count(context, predicate.collection, predicate.where)
         if op == "count_eq":
-            return count == predicate.value
+            return bool(count == predicate.value)
         if op == "count_lte":
-            return count <= predicate.value
-        return count >= predicate.value
+            return bool(count <= predicate.value)
+        return bool(count >= predicate.value)
 
     assert predicate.path is not None
     resolved = resolve_path(context, predicate.path)

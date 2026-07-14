@@ -19,7 +19,9 @@ SUPPORTED_SCHEMA_VERSION = "1.0"
 
 @lru_cache(maxsize=1)
 def _scenario_schema() -> dict[str, Any]:
-    return json.loads(resources.files("cavbench.scenarios.schemas").joinpath("scenario-v1.schema.json").read_text())
+    text = resources.files("cavbench.scenarios.schemas").joinpath("scenario-v1.schema.json").read_text()
+    schema: dict[str, Any] = json.loads(text)
+    return schema
 
 
 def validate_scenario_document(data: dict[str, Any], *, source: str) -> None:

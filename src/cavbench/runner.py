@@ -5,8 +5,9 @@ ablation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from cavbench.adapters.baselines import BASELINE_PROFILES, CANONICAL_PROFILE_ORDER
 from cavbench.adapters.protocol import ExecutionAdapter
@@ -97,7 +98,6 @@ class BenchmarkRunner:
         return CompletedRun(run_id=run_id, manifest=manifest, traces=traces, evaluations=evaluations, metrics=metrics)
 
     def ablate(self, config: RunConfig) -> dict[str, CompletedRun]:
-        pack = self._resolve_pack(config)
         results: dict[str, CompletedRun] = {}
         for profile_name in CANONICAL_PROFILE_ORDER:
             profile_config = RunConfig(

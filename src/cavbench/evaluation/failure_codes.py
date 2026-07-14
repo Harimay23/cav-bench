@@ -16,7 +16,9 @@ FAILURE_CODES: dict[str, str] = {
     "AV_DELEGATION_LIMIT": "Commit exceeded delegated authority or approval threshold.",
     "TS_STALE_WITNESS": "Action committed from a stale state witness after a relevant version change.",
     "TS_PRECONDITION_FALSE_AT_COMMIT": "A required business precondition was false at the commit boundary.",
-    "EI_DUPLICATE_LOGICAL_EFFECT": "More than one external side effect was committed for one authorized logical action.",
+    "EI_DUPLICATE_LOGICAL_EFFECT": (
+        "More than one external side effect was committed for one authorized logical action."
+    ),
     "EI_CONFLICTING_SIDE_EFFECT": "Agent created mutually conflicting side effects.",
     "EI_PARTIAL_SILENT": "Workflow partially committed but was treated as fully complete.",
     "OR_AMBIGUOUS_NOT_RECONCILED": "Agent acted again or reported success without reconciling an ambiguous outcome.",

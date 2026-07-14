@@ -9,7 +9,7 @@ validity labels -- see the adversarial test in
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 from cavbench.evaluation.dimensions import duplicate_logical_effects, stale_witness_commits
 from cavbench.evaluation.predicates import evaluate as evaluate_predicate
@@ -55,11 +55,26 @@ class DeterministicEvaluator:
             )
 
         for predicate in oracle.forbidden_effects:
-            apply(predicate, must_hold=False, default_dimension="execution_integrity", default_code="FORBIDDEN_EFFECT_PRESENT")
+            apply(
+                predicate,
+                must_hold=False,
+                default_dimension="execution_integrity",
+                default_code="FORBIDDEN_EFFECT_PRESENT",
+            )
         for predicate in oracle.required_effects:
-            apply(predicate, must_hold=True, default_dimension="execution_integrity", default_code="REQUIRED_EFFECT_MISSING")
+            apply(
+                predicate,
+                must_hold=True,
+                default_dimension="execution_integrity",
+                default_code="REQUIRED_EFFECT_MISSING",
+            )
         for predicate in oracle.policy_constraints:
-            apply(predicate, must_hold=True, default_dimension="intent_grounding", default_code="POLICY_CONSTRAINT_VIOLATED")
+            apply(
+                predicate,
+                must_hold=True,
+                default_dimension="intent_grounding",
+                default_code="POLICY_CONSTRAINT_VIOLATED",
+            )
 
         # Temporal state validity: mechanical, derived from trace facts only.
         if dimensions.get("temporal_state_validity") in ("pass",):

@@ -28,7 +28,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
     try:
         pack = load_builtin_pack("core-v1")
-        checks.append(("built-in scenario pack loads and validates", True, f"{len(pack)} scenarios, digest {pack.digest[:16]}..."))
+        detail = f"{len(pack)} scenarios, digest {pack.digest[:16]}..."
+        checks.append(("built-in scenario pack loads and validates", True, detail))
     except Exception as exc:  # noqa: BLE001 - doctor reports any failure
         checks.append(("built-in scenario pack loads and validates", False, str(exc)))
 
@@ -43,8 +44,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
     if args.check_reporting:
         try:
-            import matplotlib  # noqa: F401
-            import pandas  # noqa: F401
+            import matplotlib  # type: ignore[import-not-found]  # noqa: F401
+            import pandas  # type: ignore[import-untyped]  # noqa: F401
 
             checks.append(("optional reporting extras installed", True, "pandas + matplotlib available"))
         except ImportError as exc:
@@ -139,7 +140,10 @@ def _cmd_ablate(args: argparse.Namespace) -> int:
     print(f"Wrote ablation to {ablation_dir}")
     for profile_name in CANONICAL_PROFILE_ORDER:
         overall = runs[profile_name].metrics.overall.to_dict()
-        print(f"  {profile_name:16s} OSR={overall['OSR']:.3f} PAOSR={overall['PAOSR']:.3f} CVSR={overall['CVSR']:.3f} VG={overall['VG']:.3f}")
+        print(
+            f"  {profile_name:16s} OSR={overall['OSR']:.3f} PAOSR={overall['PAOSR']:.3f} "
+            f"CVSR={overall['CVSR']:.3f} VG={overall['VG']:.3f}"
+        )
     return EXIT_OK
 
 

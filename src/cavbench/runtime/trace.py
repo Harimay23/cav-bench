@@ -10,11 +10,12 @@ never so it can *trust* them.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from cavbench.scenarios.models import JSONValue
 from cavbench.util import freeze as _freeze
+from cavbench.util import thaw as _thaw
 
 EVENT_TYPES: tuple[str, ...] = (
     "user_input",
@@ -59,19 +60,19 @@ class TraceEvent:
             "event_type": self.event_type,
             "source": self.source,
             "tool_name": self.tool_name,
-            "args": dict(self.args) if self.args is not None else None,
+            "args": _thaw(self.args) if self.args is not None else None,
             "resource_refs": list(self.resource_refs),
-            "versions_before": dict(self.versions_before),
-            "versions_after": dict(self.versions_after),
+            "versions_before": _thaw(self.versions_before),
+            "versions_after": _thaw(self.versions_after),
             "logical_operation_id": self.logical_operation_id,
             "idempotency_key": self.idempotency_key,
             "response_status": self.response_status,
             "fault_id": self.fault_id,
-            "metadata": dict(self.metadata),
+            "metadata": _thaw(self.metadata),
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "TraceEvent":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> TraceEvent:
         return cls(
             seq=data["seq"],
             logical_time=data.get("logical_time", data["seq"]),
@@ -112,13 +113,13 @@ class EpisodeTrace:
             "adapter_name": self.adapter_name,
             "adapter_version": self.adapter_version,
             "events": [e.to_dict() for e in self.events],
-            "final_state": dict(self.final_state),
-            "side_effects": [dict(e) for e in self.side_effects],
-            "adapter_report": dict(self.adapter_report),
+            "final_state": _thaw(self.final_state),
+            "side_effects": [_thaw(e) for e in self.side_effects],
+            "adapter_report": _thaw(self.adapter_report),
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "EpisodeTrace":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> EpisodeTrace:
         return cls(
             schema_version=data.get("schema_version", "1.0"),
             scenario_id=data["scenario_id"],

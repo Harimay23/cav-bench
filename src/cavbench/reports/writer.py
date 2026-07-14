@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from cavbench.runner import CompletedRun
 
 
-def write_run(output_dir: Path, run: "CompletedRun") -> Path:
+def write_run(output_dir: Path, run: CompletedRun) -> Path:
     run_dir = Path(output_dir) / run.run_id
     traces_dir = run_dir / "traces"
     traces_dir.mkdir(parents=True, exist_ok=True)
@@ -46,10 +46,10 @@ def write_run(output_dir: Path, run: "CompletedRun") -> Path:
     return run_dir
 
 
-def write_ablation(output_dir: Path, runs: dict[str, "CompletedRun"], *, profile_order: tuple[str, ...]) -> Path:
+def write_ablation(output_dir: Path, runs: dict[str, CompletedRun], *, profile_order: tuple[str, ...]) -> Path:
     ablation_dir = Path(output_dir)
     ablation_dir.mkdir(parents=True, exist_ok=True)
-    for profile_name, run in runs.items():
+    for run in runs.values():
         write_run(ablation_dir, run)
 
     summary = {

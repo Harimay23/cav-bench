@@ -9,14 +9,15 @@ adapters never touch this class directly -- they see only
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
-from typing import Mapping
 
 from cavbench.runtime.faults import FaultScheduler
 from cavbench.runtime.ledger import SideEffect, SideEffectLedger
 from cavbench.runtime.state import VersionedStateStore
 from cavbench.runtime.trace import EpisodeTrace, TraceEvent
 from cavbench.scenarios.models import InjectionSpec, JSONValue, ScenarioDefinition
+from cavbench.util import thaw
 
 
 class BenchmarkEnvironment:
@@ -67,7 +68,7 @@ class BenchmarkEnvironment:
                 versions_after={f"{namespace}:{resource_id}": result.after.get("version")},
                 fault_id=injection.fault_id,
                 response_status=injection.mode,
-                metadata={"changes": dict(changes)},
+                metadata={"changes": thaw(changes)},
             )
         elif injection.mode in ("downstream_failure", "compensation_failure"):
             # `affects_step` lets an earlier step's completion sabotage a
@@ -84,7 +85,9 @@ class BenchmarkEnvironment:
         elif injection.mode == "ambiguous_response":
             self._record("fault", fault_id=injection.fault_id, response_status=injection.mode, metadata={})
         else:
-            self._record("fault", fault_id=injection.fault_id, response_status=injection.mode, metadata=dict(injection.payload))
+            self._record(
+                "fault", fault_id=injection.fault_id, response_status=injection.mode, metadata=thaw(injection.payload)
+            )
 
     # -- reads --------------------------------------------------------------
 
@@ -119,7 +122,7 @@ class BenchmarkEnvironment:
         args: Mapping[str, JSONValue] | None = None,
         compensation_for: str | None = None,
     ) -> dict[str, JSONValue]:
-        args = dict(args or {})
+        args = thaw(args or {})
         resource_ref = f"{namespace}:{resource_id}"
 
         before = self.state.get(namespace, resource_id)

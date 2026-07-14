@@ -5,8 +5,8 @@ from adapter-supplied data -- every field is derived by
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from cavbench.scenarios.models import DIMENSIONS, JSONValue
 
@@ -35,7 +35,7 @@ class EvaluationResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "EvaluationResult":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> EvaluationResult:
         return cls(
             scenario_id=data["scenario_id"],
             outcome_success=data["outcome_success"],

@@ -12,9 +12,9 @@ catch.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Mapping
 
 from cavbench.errors import ResourceNotFound
 from cavbench.errors import VersionConflict as VersionConflictError

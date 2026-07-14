@@ -7,8 +7,9 @@ by adapter name or type.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from cavbench.runtime.session import AdapterSession
 from cavbench.scenarios.models import JSONValue

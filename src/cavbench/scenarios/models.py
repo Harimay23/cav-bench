@@ -8,10 +8,12 @@ adapter through a normal runtime API (see ``cavbench.runtime.session``).
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from cavbench.util import freeze as _freeze
+from cavbench.util import thaw as _thaw
 
 JSONValue = Any
 
@@ -37,13 +39,13 @@ class Predicate:
     value: JSONValue = None
     collection: str | None = None
     where: Mapping[str, JSONValue] = field(default_factory=dict)
-    predicates: tuple["Predicate", ...] = ()
+    predicates: tuple[Predicate, ...] = ()
     description: str = ""
     dimension: str = ""
     failure_code: str = ""
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "Predicate":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> Predicate:
         return cls(
             op=data["op"],
             path=data.get("path"),
@@ -65,7 +67,7 @@ class Predicate:
         if self.collection is not None:
             payload["collection"] = self.collection
         if self.where:
-            payload["where"] = dict(self.where)
+            payload["where"] = _thaw(self.where)
         if self.predicates:
             payload["predicates"] = [p.to_dict() for p in self.predicates]
         if self.description:
@@ -85,7 +87,7 @@ class PrincipalContext:
     delegation: Mapping[str, JSONValue] | None = None
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "PrincipalContext":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> PrincipalContext:
         delegation = data.get("delegation")
         return cls(
             principal_id=data["principal_id"],
@@ -99,7 +101,7 @@ class PrincipalContext:
             "principal_id": self.principal_id,
             "tenant_id": self.tenant_id,
             "roles": list(self.roles),
-            "delegation": dict(self.delegation) if self.delegation is not None else None,
+            "delegation": _thaw(self.delegation) if self.delegation is not None else None,
         }
 
 
@@ -117,7 +119,7 @@ class PolicyContext:
     on_block: str = "refuse"
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "PolicyContext":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> PolicyContext:
         return cls(
             requested_intent=tuple(data.get("requested_intent", ())),
             allowed_scope=_freeze(data.get("allowed_scope", {})),
@@ -129,7 +131,7 @@ class PolicyContext:
     def to_dict(self) -> dict[str, JSONValue]:
         return {
             "requested_intent": list(self.requested_intent),
-            "allowed_scope": dict(self.allowed_scope),
+            "allowed_scope": _thaw(self.allowed_scope),
             "ambiguous_reference": self.ambiguous_reference,
             "candidate_resources": list(self.candidate_resources),
             "on_block": self.on_block,
@@ -158,7 +160,7 @@ class PlannedStep:
     logical_operation_id: str | None = None
     precondition: Predicate | None = None
     precondition_scope: str = "gate"
-    narrowed: "PlannedStep | None" = None
+    narrowed: PlannedStep | None = None
     compensates: str | None = None
     compensation_step_id: str | None = None
     depends_on: str | None = None
@@ -166,7 +168,7 @@ class PlannedStep:
     on_failure: str = "compensate"
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "PlannedStep":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> PlannedStep:
         precondition = data.get("precondition")
         narrowed = data.get("narrowed")
         return cls(
@@ -208,11 +210,11 @@ class PlannedStep:
             if value is not None:
                 payload[attr] = value
         if self.changes:
-            payload["changes"] = dict(self.changes)
+            payload["changes"] = _thaw(self.changes)
         if self.args:
-            payload["args"] = dict(self.args)
+            payload["args"] = _thaw(self.args)
         if self.action_scope:
-            payload["action_scope"] = dict(self.action_scope)
+            payload["action_scope"] = _thaw(self.action_scope)
         if self.precondition is not None:
             payload["precondition"] = self.precondition.to_dict()
             if self.precondition_scope != "gate":
@@ -231,7 +233,7 @@ class ActionPlan:
     steps: tuple[PlannedStep, ...]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "ActionPlan":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> ActionPlan:
         return cls(steps=tuple(PlannedStep.from_dict(s) for s in data.get("steps", [])))
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -281,7 +283,7 @@ class RecoverySpec:
     obligations: tuple[Predicate, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "RecoverySpec":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> RecoverySpec:
         return cls(
             required=bool(data.get("required", False)),
             obligations=tuple(Predicate.from_dict(o) for o in data.get("obligations", [])),
@@ -303,7 +305,7 @@ class ScenarioOracle:
     dimension_focus: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "ScenarioOracle":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> ScenarioOracle:
         return cls(
             goal_predicates=tuple(Predicate.from_dict(p) for p in data.get("goal_predicates", [])),
             forbidden_effects=tuple(Predicate.from_dict(p) for p in data.get("forbidden_effects", [])),
@@ -333,7 +335,7 @@ class InjectionSpec:
     payload: Mapping[str, JSONValue] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "InjectionSpec":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> InjectionSpec:
         return cls(
             fault_id=data["fault_id"],
             hook=data["hook"],
@@ -348,7 +350,7 @@ class InjectionSpec:
             "hook": self.hook,
             "ordinal": self.ordinal,
             "mode": self.mode,
-            "payload": dict(self.payload),
+            "payload": _thaw(self.payload),
         }
 
 
@@ -372,7 +374,7 @@ class ScenarioDefinition:
         return self.view.family
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, JSONValue]) -> "ScenarioDefinition":
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> ScenarioDefinition:
         task = data["task"]
         view = ScenarioView(
             id=data["id"],
@@ -408,7 +410,7 @@ class ScenarioDefinition:
             "policy": self.view.policy.to_dict(),
             "plan": self.view.plan.to_dict(),
             "world": {
-                "initial_state": dict(self.initial_state),
+                "initial_state": _thaw(self.initial_state),
                 "injections": [i.to_dict() for i in self.injections],
             },
             "oracle": self.oracle.to_dict(),

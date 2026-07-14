@@ -9,7 +9,7 @@ ledger) and never consult adapter-supplied metadata.
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 from cavbench.runtime.trace import EpisodeTrace
 from cavbench.scenarios.models import JSONValue

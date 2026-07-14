@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 from cavbench.evaluation.results import EvaluationResult, MetricSummary, RateSummary
 from cavbench.scenarios.models import ScenarioDefinition
 
 
-def _rates(counter: Counter) -> RateSummary:
+def _rates(counter: Counter[str]) -> RateSummary:
     n = counter["n"]
     if n == 0:
         return RateSummary(n=0, osr=0.0, paosr=0.0, cvsr=0.0, vg=0.0, pavg=0.0)
@@ -20,8 +20,8 @@ def _rates(counter: Counter) -> RateSummary:
 
 
 def aggregate(rows: Iterable[tuple[ScenarioDefinition, EvaluationResult]]) -> MetricSummary:
-    totals: Counter = Counter()
-    by_family: dict[str, Counter] = defaultdict(Counter)
+    totals: Counter[str] = Counter()
+    by_family: dict[str, Counter[str]] = defaultdict(Counter)
     for scenario, result in rows:
         totals["n"] += 1
         family_counter = by_family[scenario.family]

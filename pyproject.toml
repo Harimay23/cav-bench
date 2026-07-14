@@ -65,13 +65,23 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+pythonpath = ["src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# UP017: datetime.UTC is 3.11+-only; timezone.utc works identically on every
+# supported version and is kept deliberately so the codebase is also
+# exercisable on older interpreters during development.
+ignore = ["UP017"]
+
+[tool.ruff.lint.per-file-ignores]
+# One-time scenario-authoring script: long declarative dict literals (one
+# scenario per entry) are more readable unwrapped than force-wrapped.
+"scripts/build_core_v1_pack.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -79,3 +89,9 @@ strict = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
 exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+# jsonschema has no bundled type stubs. matplotlib/pandas (optional
+# `reporting` extras) are ignored inline at their single import site instead.
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true

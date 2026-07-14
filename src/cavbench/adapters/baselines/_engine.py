@@ -139,7 +139,9 @@ class _Run:
 
     # -- policy gate ----------------------------------------------------
 
-    def _apply_policy_gate(self, step: PlannedStep, observed: dict[str, JSONValue]) -> tuple[PlannedStep | None, str | None]:
+    def _apply_policy_gate(
+        self, step: PlannedStep, observed: dict[str, JSONValue]
+    ) -> tuple[PlannedStep | None, str | None]:
         policy = self._scenario.policy
         principal = self._scenario.principal
         reasons: list[str] = []

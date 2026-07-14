@@ -10,10 +10,11 @@ Only :mod:`cavbench.runtime.environment` may construct and append effects.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from cavbench.scenarios.models import JSONValue
+from cavbench.util import thaw as _thaw
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ class SideEffect:
             "logical_operation_id": self.logical_operation_id,
             "idempotency_key": self.idempotency_key,
             "resource_ref": self.resource_ref,
-            "payload": dict(self.payload),
+            "payload": _thaw(self.payload),
             "compensation_for": self.compensation_for,
         }
 
