@@ -127,6 +127,7 @@ The adapter and scenario-pack boundaries are stable extension points; neither re
 - [`docs/scenario-authoring.md`](docs/scenario-authoring.md) — scenario schema and how to write one
 - [`docs/adapter-authoring.md`](docs/adapter-authoring.md) — the adapter protocol
 - [`docs/reproducibility.md`](docs/reproducibility.md) — exact reproduction commands and expected output
+- [`docs/citation.md`](docs/citation.md) — which DOI to cite and when, APA/BibTeX, future-release DOI handling
 - [`DECISION_LOG.md`](DECISION_LOG.md) — locked design decisions, including everything changed during the v0.3 → v1.0 hardening pass
 
 ## Limitations
@@ -164,7 +165,7 @@ For the exact v1.0.0 implementation and canonical ablation results, cite:
 
 The exact source archive associated with the canonical v1.0.0 experiment is preserved on Zenodo under DOI [10.5281/zenodo.21364386](https://doi.org/10.5281/zenodo.21364386), independent of any later changes to this repository.
 
-See also [`CITATION.cff`](CITATION.cff), which GitHub's "Cite this repository" button reads automatically.
+See also [`CITATION.cff`](CITATION.cff), which GitHub's "Cite this repository" button reads automatically, and [`docs/citation.md`](docs/citation.md) for the full citation guide, including why reproducibility claims specifically must cite the version DOI rather than the concept DOI.
 
 ## License
 
