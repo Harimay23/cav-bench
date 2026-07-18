@@ -10,6 +10,21 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Documentation
 
+- Added the future-workstream design package (`docs/design/`): proposed
+  designs for an independent external validation run, hidden-failure
+  discovery, a before-and-after improvement case, the commerce-v1
+  consequential-action profile, generic MCP/REST protocol integration, and
+  a versioned follow-up release, with an index. All designs are
+  `Status: Proposed`; nothing is approved for implementation and no
+  production behavior, evaluator semantics, scenario packs, dependencies,
+  or version metadata changed.
+- Added program execution-control documents (`docs/program/`): an
+  implementation manifest (future execution queue), gate-state lifecycle,
+  external-evidence policy, Fable execution contract, PR and branch
+  strategy, and a resume-and-recovery protocol.
+- Added shared program diagrams (`docs/diagrams/`): future system
+  architecture, validation and evidence lifecycle, workstream dependency
+  map, and release and adoption gates.
 - Added Claude Code project guidance, a 90-day technical validation and
   adoption roadmap, a 14-day validation sprint, program and architecture
   diagrams, adoption and validation tracking guidance, and repository-ready
