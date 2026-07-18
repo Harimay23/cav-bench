@@ -1,15 +1,21 @@
-"""Contract tests for the design-stage LangGraph adapter skeleton.
+"""Contract tests for the LangGraph adapter's dependency and protocol boundary.
 
-These do not test LangGraph integration behavior (there isn't any yet --
-see docs/langgraph-adapter-mapping.md). They test the three properties the
-skeleton is required to have: it satisfies the ExecutionAdapter protocol
-shape, it never makes LangGraph a hard dependency of importing cavbench,
-and it fails honestly rather than fabricating a result.
+These do not exercise LangGraph execution behavior (that lives in
+``tests/langgraph/``, and is skipped when the optional extra is not
+installed). They pin the properties that must hold *regardless* of whether
+LangGraph is installed: the adapter satisfies the ExecutionAdapter protocol
+shape, importing cavbench (including the adapter and reference-fixture
+modules) never requires or imports langgraph, a missing dependency produces
+a clear invocation-time error, and the optional extra is actually declared.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -19,23 +25,25 @@ from cavbench.runtime.session import AdapterSession
 from cavbench.runtime.tools import ToolFacade
 from cavbench.scenarios.loader import load_builtin_pack
 
-PACK = load_builtin_pack("core-v1")
+LANGGRAPH_INSTALLED = importlib.util.find_spec("langgraph") is not None
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_langgraph_module_is_not_already_imported() -> None:
-    """Sanity check on the test environment itself: if this fails, some
-    other test already imported langgraph and the isolation tests below
-    would not be meaningful."""
-    assert "langgraph" not in sys.modules
-
-
-def test_importing_the_adapter_module_does_not_require_or_import_langgraph() -> None:
-    # Re-import is safe/idempotent even if another test already imported it.
-    import cavbench.adapters.langgraph  # noqa: F401
-
-    assert "langgraph" not in sys.modules, (
-        "importing cavbench.adapters.langgraph must not eagerly import langgraph -- "
-        "LangGraph is an optional dependency (docs/langgraph-adapter-mapping.md)"
+def test_importing_adapter_modules_does_not_import_langgraph() -> None:
+    """Run in a subprocess so the check is meaningful even when other tests
+    in this session already imported langgraph (e.g. tests/langgraph/)."""
+    code = (
+        "import sys; "
+        "import cavbench; "
+        "import cavbench.adapters.langgraph; "
+        "import cavbench.adapters.langgraph_reference; "
+        "assert 'langgraph' not in sys.modules, 'lazy-import contract violated'; "
+        "assert 'langchain_core' not in sys.modules, 'lazy-import contract violated'"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        "importing cavbench adapter modules must never import langgraph "
+        f"(docs/langgraph-adapter-mapping.md); stderr:\n{result.stderr}"
     )
 
 
@@ -48,16 +56,36 @@ def test_langgraph_adapter_satisfies_the_execution_adapter_protocol() -> None:
     assert isinstance(adapter.version, str) and adapter.version
 
 
-def test_langgraph_adapter_run_fails_clearly_instead_of_fabricating_a_result() -> None:
+@pytest.mark.skipif(LANGGRAPH_INSTALLED, reason="only meaningful when the optional extra is absent")
+def test_missing_langgraph_raises_a_clear_invocation_time_error() -> None:
+    """Constructing the adapter must work without langgraph; invoking it must
+    fail with an error that names the missing optional dependency and how to
+    install it -- not a bare ModuleNotFoundError from deep inside a graph."""
     from cavbench.adapters.langgraph import LangGraphAdapter
 
-    scenario = PACK.get("HP-01")
-    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-skeleton-test")
+    scenario = load_builtin_pack("framework-v1").get("FA-01")
+    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-missing-dep-test")
     session = AdapterSession(scenario.view, ToolFacade(env))
 
-    adapter = LangGraphAdapter()
-    with pytest.raises((ImportError, NotImplementedError)) as exc_info:
-        adapter.run(session)
+    with pytest.raises(ImportError) as exc_info:
+        LangGraphAdapter().run(session)
 
     message = str(exc_info.value)
-    assert message, "the raised error must carry a clear, non-empty explanation"
+    assert "langgraph" in message
+    assert "cav-bench[langgraph]" in message
+
+
+def test_reference_graph_builder_rejects_unknown_scenarios_before_importing_langgraph() -> None:
+    from cavbench.adapters.langgraph_reference import build_reference_graph
+
+    scenario = load_builtin_pack("core-v1").get("HP-01")
+    with pytest.raises(ValueError, match="no reference graph"):
+        build_reference_graph(scenario.view)
+
+
+def test_pyproject_declares_langgraph_as_an_optional_extra_only() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    core_deps = " ".join(pyproject["project"]["dependencies"])
+    assert "langgraph" not in core_deps, "langgraph must never be a core dependency"
+    extra = pyproject["project"]["optional-dependencies"]["langgraph"]
+    assert any(dep.startswith("langgraph>=") for dep in extra)
