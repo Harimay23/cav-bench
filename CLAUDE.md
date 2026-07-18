@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+`AGENTS.md` remains the full agent operating-instruction source — read that
+first. This file supplements it with current program-level mission and
+planning context; it does not replace or override `AGENTS.md`.
+
 ## Project mission
 
 CAV-Bench independently evaluates whether consequential AI-agent actions remain valid across intent, authority, current state, execution integrity, and recovery.
@@ -10,12 +14,16 @@ During the current 90-day program, prioritize independently reproducible use, ex
 
 ## Non-negotiable architecture rules
 
-1. The system under evaluation must never grade itself.
+1. The system under evaluation must never grade itself. See
+   `docs/architecture.md` for the trust model and
+   `tests/contract/test_evaluator_independence.py` for the adversarial test
+   that enforces it.
 2. Framework state, adapter output, model output, and agent-reported status are never authoritative commit truth.
 3. Committed-effect truth must come from the benchmark environment, private oracle, authoritative state history, and side-effect ledger.
 4. Never conflate attempted, acknowledged, committed, reconciled, compensated, and reported effects.
 5. Do not change CVSR semantics, validity dimensions, or consequential-commit definitions without an approved issue and `DECISION_LOG.md` entry.
-6. Never edit canonical golden results merely to make tests pass.
+6. Never edit canonical golden results merely to make tests pass — see
+   `DECISION_LOG.md` D-018 and `AGENTS.md`.
 7. Do not claim endorsement, adoption, validation, or official support without explicit external evidence.
 8. Keep optional framework dependencies isolated from the core package.
 
@@ -33,7 +41,8 @@ During the current 90-day program, prioritize independently reproducible use, ex
 
 For every material change:
 
-1. Read the relevant issue and linked design documents.
+1. Read `AGENTS.md` first, then the relevant issue and linked design
+   documents.
 2. Create a narrowly scoped branch.
 3. State assumptions and non-goals before coding.
 4. Add or update tests with behavior changes.
