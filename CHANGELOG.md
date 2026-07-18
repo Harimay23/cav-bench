@@ -10,6 +10,11 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Documentation
 
+- Added Claude Code project guidance, a 90-day technical validation and
+  adoption roadmap, a 14-day validation sprint, program and architecture
+  diagrams, adoption and validation tracking guidance, and repository-ready
+  GitHub issue templates. No benchmark behavior, scoring semantics, or
+  evaluator logic changed.
 - Added project-level and version-specific DOI guidance.
 - Added complete APA and BibTeX citation examples.
 - Clarified reproducibility citation for v1.0.0.
