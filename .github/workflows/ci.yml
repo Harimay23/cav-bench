@@ -75,6 +75,60 @@ jobs:
       - run: cavbench validate --pack core-v1
       - run: cavbench ablate --output runs/ci-ablation
 
+  # Optional-integration job: the `langgraph` extra is never required to
+  # import cavbench or run the core benchmark (see the `test` job above,
+  # which never installs it), but the executable LangGraph runtime under
+  # tests/langgraph/ is skipped by pytest.importorskip when the extra is
+  # absent -- so it needs its own job to actually run, not just be present
+  # in the repo. Matrix covers the declared range's floor (the release that
+  # introduced the durability= invoke argument the adapter uses) and the
+  # latest release available at run time; the declared upper bound
+  # (`langgraph<2`) is not exhaustively tested version-by-version in
+  # between -- see docs/langgraph-adapter-mapping.md.
+  langgraph:
+    name: langgraph integration (${{ matrix.langgraph-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - langgraph-version: "0.6.0"
+            langgraph-pin: "langgraph==0.6.0"
+          - langgraph-version: "latest"
+            langgraph-pin: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install cav-bench with the langgraph extra
+        run: pip install -e ".[dev,langgraph]" ${{ matrix.langgraph-pin }}
+      - name: Report the resolved langgraph version
+        run: python -c "import importlib.metadata as m; print(m.version('langgraph'))"
+      - run: pytest -q tests/langgraph
+      - run: python examples/langgraph_adapter.py
+      - run: cavbench validate --pack framework-v1
+
+  wheel-smoke-test-langgraph:
+    name: wheel smoke test (langgraph extra)
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Install the built wheel with its langgraph optional dependency
+        run: |
+          WHEEL=$(ls dist/*.whl)
+          pip install "${WHEEL}[langgraph]"
+      - run: cavbench validate --pack framework-v1
+      - run: python examples/langgraph_adapter.py
+
   canonical-ablation:
     runs-on: ubuntu-latest
     needs: [test]

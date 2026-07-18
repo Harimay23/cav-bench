@@ -115,7 +115,23 @@ range for the APIs actually used (`StateGraph`, `add_conditional_edges`,
 `compile(checkpointer=..., interrupt_after=...)`,
 `invoke(..., durability=...)`, `langgraph.config.get_config`,
 `InMemorySaver`): `langgraph>=0.6,<2` — `0.6` introduced the `durability`
-invoke argument; both ends of the range are exercised by the test suite.
+invoke argument used by the adapter, and `<2` is a one-major-version buffer
+under the project's ordinary semver trust assumption (no breaking changes
+within a documented major version), not a claim that every version in that
+range has been individually tested.
+
+**What is actually continuously tested, and where** (see
+[Local vs. CI validation](#local-vs-ci-validation) for the full
+distinction): the `langgraph` CI job (`.github/workflows/ci.yml`) runs the
+full `tests/langgraph/` suite, `examples/langgraph_adapter.py`, and
+`cavbench validate --pack framework-v1` against exactly two resolved
+versions on every push/PR — the declared floor, `langgraph==0.6.0`, and
+whatever `pip install ".[langgraph]"` resolves to as "latest" at CI run
+time (currently `1.2.9`). Versions strictly between the floor and latest
+are **not** individually exercised by CI; if the range needs narrowing or
+splitting because an intermediate release turns out to be incompatible,
+that would surface as a `langgraph` job failure on a version bump, not
+silently.
 
 ## Normalized-event-to-LangGraph mapping
 
@@ -307,6 +323,42 @@ limitations; they are **not** a recommended production architecture:
   out of scope for this milestone.
 - The fixture covers the four `framework-v1` scenarios only; it is not a
   general LangGraph-agent harness.
+
+## Local vs. CI validation
+
+Two distinct things can be called "the tests pass," and this document
+keeps them separate:
+
+- **Local validation** is whatever a contributor (or an agent) runs by
+  hand in a development environment — e.g. `pytest`,
+  `pytest tests/langgraph`, `ruff check .`, `mypy src/cavbench`,
+  `python -m build`, ad hoc venvs pinned to a specific `langgraph`
+  version. It is useful for iterating and for spot-checking versions
+  outside the CI matrix, but it is **not** a substitute for CI: a local
+  run reflects one machine, one Python build, and whatever was installed
+  by hand at that moment, and it does not run on every push or PR.
+- **CI validation** is exactly what `.github/workflows/ci.yml` runs on
+  every push to `main` and every pull request, and is the only validation
+  that gates merges. As of this milestone it includes, specifically for
+  the LangGraph integration:
+  - `test` (unchanged): `pytest -q` across Python 3.11/3.12/3.13, **without**
+    the `langgraph` extra installed — this is what continuously verifies
+    core dependency isolation (`tests/langgraph/` skips cleanly) and the
+    missing-dependency error path (`tests/contract/test_langgraph_adapter_contract.py`).
+  - `langgraph` (new): a two-leg matrix (`langgraph==0.6.0` and the
+    range's "latest" resolved version) that installs
+    `.[dev,langgraph]`, then runs `pytest -q tests/langgraph`,
+    `python examples/langgraph_adapter.py`, and
+    `cavbench validate --pack framework-v1` — this is what continuously
+    exercises the real LangGraph runtime, not just source that happens to
+    reference it.
+  - `wheel-smoke-test-langgraph` (new): installs the *built wheel* with
+    its `[langgraph]` extra (not an editable source install) and runs
+    `cavbench validate --pack framework-v1` plus the example, so the
+    packaged optional extra is verified too, not only the source tree.
+
+Any claim in this document about what is "tested" or "exercised" refers to
+this CI matrix, not to a one-off local run.
 
 ## Installation and minimal execution
 
