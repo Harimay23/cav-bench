@@ -67,6 +67,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
         return EXIT_OK
     if args.target == "packs":
         print("core-v1")
+        print("framework-v1")
         return EXIT_OK
     if args.target == "scenarios":
         pack = load_builtin_pack(args.pack)

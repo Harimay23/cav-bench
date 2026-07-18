@@ -35,6 +35,11 @@ dependencies = [
 
 [project.optional-dependencies]
 reporting = ["pandas>=2", "matplotlib>=3"]
+# Only needed to actually run LangGraphAdapter; never required to import
+# cavbench or run the core benchmark. Floor = first release with the
+# durability= invoke argument used by the adapter; both ends of the range
+# are exercised in tests (docs/langgraph-adapter-mapping.md).
+langgraph = ["langgraph>=0.6,<2"]
 dev = [
   "pytest>=8",
   "pytest-cov>=5",
@@ -93,5 +98,7 @@ exclude = ["tests/"]
 [[tool.mypy.overrides]]
 # jsonschema has no bundled type stubs. matplotlib/pandas (optional
 # `reporting` extras) are ignored inline at their single import site instead.
-module = ["jsonschema", "jsonschema.*"]
+# langgraph is an optional extra imported only lazily; core type-checking
+# must succeed without it installed.
+module = ["jsonschema", "jsonschema.*", "langgraph", "langgraph.*"]
 ignore_missing_imports = true
