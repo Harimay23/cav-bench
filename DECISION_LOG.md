@@ -153,3 +153,11 @@
 **Decision:** In addition to the `after_read:<namespace>:<resource_id>` and `before_commit:<tool>:<namespace>:<resource_id>` hooks (used for state mutation faults), the environment fires `before_commit_step:<step_id>` and `after_commit_step:<step_id>` on every commit attempt. `downstream_failure` and `compensation_failure` injections target a step_id directly (via this hook, or via an explicit `affects_step` payload fired from an earlier step's `after_commit_step` hook), rather than a tool/resource pair.
 
 **Reason:** Several execution-recovery scenarios (e.g. `ER-08`) have multiple steps that share the same tool and resource (three `cancel_order_item` calls against the same order) but need only one of them to fail. Tool/resource-scoped hooks cannot express that; step-scoped hooks can, without adding scenario-ID-specific branches to the environment or engine.
+
+---
+
+## D-020 — Framework-adapter scenarios ship as a separate builtin pack (`framework-v1`), never as `core-v1` additions
+
+**Decision:** The four framework-adapter scenarios defined in `docs/framework-adapter-brief.md` (stale state before commit, ambiguous retry, partial execution, authority change before commit) are implemented as a second builtin pack, `framework-v1` (`FA-01`…`FA-04`), loaded through the same `load_builtin_pack` / schema-validation path as `core-v1`. They are framework-neutral scenario definitions (any adapter, including the five baselines, can execute them); the LangGraph reference fixture is merely their first consumer.
+
+**Reason:** `core-v1` is the frozen canonical 40-scenario corpus whose aggregate ablation results are golden regression targets (D-012); adding scenarios to it would silently change every aggregate metric. A separate pack lets framework-adapter work ship executable, schema-validated scenarios without perturbing the canonical table, and keeps the brief's promise that these are new framework-facing scenarios, not aliases of existing `core-v1` IDs. Tests pin that `core-v1` still contains exactly 40 scenarios with no `FA-*` ids and that the canonical ablation is unchanged.

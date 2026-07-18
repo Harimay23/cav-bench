@@ -8,7 +8,20 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ## [Unreleased]
 
+### Added
+
+- Executable LangGraph integration (the next milestone from Issue #5, stacked on the PR #6 design-stage skeleton):
+  - `LangGraphAdapter` now actually runs a compiled LangGraph graph against an `AdapterSession` (checkpointer, durable `thread_id`, `durability="sync"`), mapping terminal graph state to an untrusted `AdapterResult`. LangGraph stays an optional, lazily-imported dependency; a missing install raises a clear invocation-time error naming `cav-bench[langgraph]`.
+  - Optional `langgraph` extra in `pyproject.toml` (`langgraph>=0.6,<2`; both ends of the range exercised by tests).
+  - `framework-v1` builtin scenario pack: the four framework-adapter scenarios from `docs/framework-adapter-brief.md` (FA-01 stale state before commit, FA-02 ambiguous retry, FA-03 partial execution, FA-04 authority change before commit), kept separate from the frozen `core-v1` corpus (see DECISION_LOG D-020).
+  - Deterministic reference LangGraph graphs (`cavbench.adapters.langgraph_reference`) — test fixtures, not a production design — in `guarded` and deliberately-flawed `naive` variants, with stable `operation_id`/`idempotency_key` derivation from durable scenario/thread/step identity.
+  - `tests/langgraph/`: runtime tests for all four scenarios, adversarial trust-boundary tests (graph/adapter success claims cannot alter evaluator output), identifier stability across retry and checkpoint resume, safe idempotent replay, and bit-for-bit determinism; `tests/contract/test_langgraph_adapter_contract.py` covers dependency isolation without langgraph installed.
+  - `examples/langgraph_adapter.py`: runnable outcome-pass vs. commit-valid-fail demonstration (naive run passes a conventional outcome check but fails commit validity on `TS_STALE_WITNESS`; the guarded control adds one revalidation node and becomes commit-valid).
+- `cavbench list packs` now lists both builtin packs.
+
 ### Documentation
+
+- Rewrote `docs/langgraph-adapter-mapping.md` to distinguish design decisions inherited from PR #6 from implemented runtime behavior, and to document authority evidence, state-read vs. commit-time revalidation, attempted-vs-committed evidence, reconciliation behavior, identifier derivation, synchronous durability, fixture limitations, and installation/minimal-execution instructions. No official LangChain/LangGraph support, endorsement, adoption, certification, or validation is claimed.
 
 - Added project-level and version-specific DOI guidance.
 - Added complete APA and BibTeX citation examples.
