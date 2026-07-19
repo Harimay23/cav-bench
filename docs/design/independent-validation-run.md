@@ -1,6 +1,16 @@
 # Design: Independent External Validation Run
 
-Status: Proposed
+Status: Approved for implementation with conditions (tooling scope only)
+
+> **Design approval:** [`docs/program/approvals/M-IVT-1.md`](../program/approvals/M-IVT-1.md)
+> records human approval, at reviewed commit
+> `38c5e1e8590e17c2798618c0490db7958d7f739d`, scoped to the tooling and a
+> maintainer dry run only — not to any real external run, which remains a
+> separate, unresolved external-evidence gate. Approval is
+> design-specific, not implementation, PR approval, merge authorization,
+> or external validation — see the approval record for the exact approved
+> and unapproved scope. No implementation has occurred under this
+> approval, and no independent run has occurred.
 
 This document designs the process, tooling requirements, and evidence model
 for an **independently conducted external benchmark run** of CAV-Bench — the

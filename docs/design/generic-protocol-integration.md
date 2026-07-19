@@ -1,6 +1,14 @@
 # Design: Generic MCP or REST Integration
 
-Status: Proposed
+Status: Approved for implementation with conditions
+
+> **Design approval:** [`docs/program/approvals/M-GPI-1.md`](../program/approvals/M-GPI-1.md)
+> records human approval, at reviewed commit
+> `38c5e1e8590e17c2798618c0490db7958d7f739d`, with conditions and
+> unresolved external prerequisites. Approval is design-specific, not
+> implementation, PR approval, merge authorization, or external
+> validation — see the approval record for the exact approved and
+> unapproved scope. No implementation has occurred under this approval.
 
 This document designs a **generic protocol integration layer** so that
 external agents and services that speak common protocols — REST clients
