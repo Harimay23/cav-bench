@@ -61,8 +61,11 @@ retest → before-and-after case artifact → versioned release.
 
 Boxes on the spine alternate between **buildable** things (tooling
 milestones, in `M-…` labels) and **external acts** that no amount of
-building can produce: the independent run, the real finding, the
-subject-owner's remediation. Those external boxes are why several
+building can produce: the independent run, the real finding (which, to
+satisfy the roadmap outcome, must be a validated, reproduced finding of
+`primary_class: hidden_invalid_commit` —
+[`../design/hidden-failure-discovery.md`](../design/hidden-failure-discovery.md),
+HFD-FR-006a), the subject-owner's remediation. Those external boxes are why several
 manifest entries park at `VALIDATING` or `BLOCKED_EXTERNAL_INPUT` even
 after their tooling merges
 ([`../program/gate-state.md`](../program/gate-state.md)).

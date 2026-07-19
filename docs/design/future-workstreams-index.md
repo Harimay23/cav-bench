@@ -5,9 +5,12 @@ Status: Proposed
 This index makes the future-workstream design package discoverable: six
 workstream designs, six program execution-control documents, and four
 shared diagrams. Every document in the package is **Proposed** — none is
-approved for implementation; approval happens only through human review of
-the documentation pull request and the gate process defined in
-`../program/gate-state.md`. Merging this documentation approves nothing.
+approved for implementation. Approval is **per design, not per PR**: each
+design requires its own design-approval record in the format defined in
+`../program/gate-state.md` (design path, reviewed commit SHA, decision,
+approver, timestamp, conditions, unresolved external prerequisites).
+Generic approval or merging of the documentation pull request that
+carries this package approves none of the six designs.
 
 The package designs future work for the current 90-day program
 (`../strategy/90-day-engineering-program.md`) beyond the in-flight

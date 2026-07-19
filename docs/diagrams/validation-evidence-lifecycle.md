@@ -27,7 +27,7 @@ flowchart TB
 
     subgraph capture [2. Capture and integrity]
         C1[Artifact bundle<br/>raw + derived artifacts]
-        C2[Integrity manifest<br/>SHA-256 per file]
+        C2[checksums.sha256 per file<br/>+ detached bundle root<br/>non-recursive]
         C3[Provenance fields<br/>who, when, commit, command]
         C1 --- C2 --- C3
     end
@@ -42,7 +42,7 @@ flowchart TB
     end
 
     subgraph review [4. Review]
-        R1[Integrity check<br/>checksums match]
+        R1[Integrity check<br/>root, manifest format,<br/>per-file, no unlisted files]
         R2[Consistency check<br/>metrics re-derive from artifacts]
         R3[Independence rubric<br/>assistance disclosed and bounded]
         R4[Class confirmed or demoted<br/>never promoted]
@@ -78,9 +78,13 @@ evidence classes of the external-evidence policy. A rehearsal run by
 project tooling can be flawless and still never move right of lane 1's
 class — quality does not change provenance.
 
-**Capture (2)** is identical for everyone: raw artifacts, per-file
-checksums, and the class-specific minimum provenance fields. Uniform
-capture is what makes later review mechanical instead of forensic.
+**Capture (2)** is identical for everyone: raw artifacts, the
+non-recursive integrity files (`checksums.sha256` over every content
+file, plus a detached bundle-root checksum over the manifest — the model
+defined in
+[`../design/independent-validation-run.md`](../design/independent-validation-run.md)),
+and the class-specific minimum provenance fields. Uniform capture is
+what makes later review mechanical instead of forensic.
 
 **Classification (3)** asks exactly one question. Note what it does not
 ask: not "how good is the evidence," not "who possesses the file."

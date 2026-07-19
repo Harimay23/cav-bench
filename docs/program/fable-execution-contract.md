@@ -34,8 +34,11 @@ The executor must:
 4. **Select only the next eligible milestone** (algorithm below) — never
    two, never a favorite.
 5. **Verify its dependencies and approvals** against recorded evidence,
-   not assumptions: design approval record exists, dependency milestones
-   are `MERGED`/`COMPLETE`, required external inputs are present.
+   not assumptions: a design-approval record in the `gate-state.md`
+   format exists, its decision is `approved` (or its conditions are
+   met), its reviewed commit SHA matches the design being implemented,
+   dependency milestones are `MERGED`/`COMPLETE`, and required external
+   inputs are present.
 6. **Create one milestone branch** per the branch strategy, from the
    correct, freshly-fetched base.
 7. **Implement only that milestone**, within the manifest entry's
@@ -80,7 +83,8 @@ Before any work in any session, in order:
 4. Fetch origin; note the current SHA of `main` and of any dependency
    branches.
 5. Read the manifest; compute eligibility (below).
-6. Verify the selected entry's approval evidence and dependency states.
+6. Verify the selected entry's design-approval record (existence,
+   decision, commit match, condition status) and dependency states.
 7. Write a session-start journal checkpoint (milestone, base SHA, plan).
 8. Only then create or check out the milestone branch.
 

@@ -76,9 +76,17 @@ artifact.
 ## Preconditions and dependencies
 
 - A `validated`, `reproduced` finding record from the hidden-failure
-  workflow (its `finding_id` is this process's foreign key).
-- The finding's baseline evidence bundle, integrity-manifested at capture
-  time (`docs/design/independent-validation-run.md` bundle format).
+  workflow (its `finding_id` is this process's foreign key). A case
+  intended to support the roadmap's improvement outcome must start from a
+  finding with `primary_class: hidden_invalid_commit`
+  (`docs/design/hidden-failure-discovery.md`, HFD-FR-006a); cases built
+  on other finding classes (`recovery_failure`, `false_success_report`)
+  are legitimate but must be labeled by their class and do not satisfy
+  the hidden consequential-action-failure chain.
+- The finding's baseline evidence bundle, captured under the
+  non-recursive integrity model of
+  `docs/design/independent-validation-run.md` (checksum manifest +
+  detached bundle root).
 - A system owner willing to implement (or formally accept the design of) a
   remediation and permit a retest — external input that cannot be
   automated.
@@ -89,11 +97,14 @@ artifact.
 ## Functional requirements
 
 - **BAI-FR-001** — The original baseline (run artifacts, evaluation
-  results, finding record, environment description) must be preserved with
-  an integrity manifest **at finding-validation time**, before any
-  remediation work begins; its checksums must be committed to a
-  timestamped, append-only location (e.g. the finding record in version
-  control) so later substitution is detectable.
+  results, finding record, environment description) must be preserved
+  under the non-recursive integrity model
+  (`checksums.sha256` + detached bundle root, per
+  `docs/design/independent-validation-run.md`) **at finding-validation
+  time**, before any remediation work begins; the bundle-root checksum
+  must be committed to a timestamped, append-only location (e.g. the
+  finding record in version control) so later substitution is
+  detectable.
 - **BAI-FR-002** — Benchmark and subject versions must be frozen and
   recorded: CAV-Bench version + commit + pack digest, subject system
   version + configuration digest, adapter version, seeds. The retest must
@@ -167,13 +178,13 @@ flowchart LR
 ## Component responsibilities
 
 - **Baseline evidence bundle** — frozen at finding validation; read-only
-  thereafter; checksums recorded in version control.
+  thereafter; bundle-root checksum recorded in version control.
 - **Remediation plan** — hypothesis, expected effect, comparability plan;
   committed before retest.
 - **Changed-system manifest** — complete enumeration of subject-side
   changes; owner-signed.
-- **Retest evidence bundle** — same format as baseline; integrity-manifested
-  at capture.
+- **Retest evidence bundle** — same format as baseline; checksum manifest
+  and detached bundle root generated at capture.
 - **Comparison engine** — deterministic diff over two evaluation result
   sets; a tooling deliverable (`M-IET-1`); a manual first case may compute
   it by documented hand procedure.
@@ -201,24 +212,25 @@ its change process are entirely external.
   case, and is why the determination scale stops at `supported` rather
   than `proven`.
 - The person authoring the comparison report must not be able to alter
-  either bundle; integrity manifests and version-controlled checksums
-  enforce detectability (BAI-FR-001).
+  either bundle; the integrity model's per-file manifests and the
+  version-controlled bundle roots enforce detectability (BAI-FR-001).
 
 ### Preventing retrospective baseline manipulation
 
 Three mutually reinforcing controls:
 
-1. **Freeze at validation time** — the baseline bundle's integrity manifest
-   is generated when the finding is validated, before remediation exists;
-   its root checksum goes into the finding record, which is committed to
-   the repository (or restricted store) with normal version-control
-   history.
+1. **Freeze at validation time** — the baseline bundle's checksum
+   manifest and detached bundle root are generated when the finding is
+   validated, before remediation exists; the bundle-root checksum goes
+   into the finding record, which is committed to the repository (or
+   restricted store) with normal version-control history.
 2. **Pre-registration** — the remediation hypothesis is committed before
    the retest runs; a hypothesis whose commit timestamp postdates the
    retest bundle makes the case at best `partially_supported`.
-3. **Single-source truth** — the comparison engine reads both bundles by
-   checksum reference; a bundle that no longer matches its recorded
-   checksum fails the comparison run outright.
+3. **Single-source truth** — the comparison engine opens both bundles by
+   recorded bundle root and runs the full verification order (root,
+   manifest format, per-file, no unlisted files) before reading anything;
+   a bundle failing any step fails the comparison run outright.
 
 ## Data and evidence flow
 
@@ -251,8 +263,9 @@ configuration digests before/after.
 ### Retest evidence bundle
 
 Identical layout to the baseline bundle (validation-run bundle format):
-raw run artifacts, validation-run manifest, integrity manifest, plus
-`finding_id` linkage and the completed comparability checklist.
+raw run artifacts, validation-run manifest, `checksums.sha256` and
+detached bundle root, plus `finding_id` linkage and the completed
+comparability checklist.
 
 ### Comparison report
 

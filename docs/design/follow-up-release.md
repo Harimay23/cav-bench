@@ -130,8 +130,11 @@ release milestone `M-REL-NEXT` stays `BLOCKED` until entry criteria hold.
   reproducibility package: exact reproduction commands, expected outputs
   (canonical ablation for core; golden expectations for any new pack),
   pack digests, and — where independent-run bundles exist at a
-  publishable disclosure level — references to those bundles. It must be
-  verifiable offline from the released artifacts.
+  publishable disclosure level — references to those bundles by their
+  recorded bundle-root checksums (the non-recursive integrity model of
+  `docs/design/independent-validation-run.md`). It must be verifiable
+  offline from the released artifacts, including re-running each
+  referenced bundle's verification order.
 - **REL-FR-011 (evidence manifest)** — The release includes an evidence
   manifest enumerating every externally-facing claim in the release notes
   and README changes, each mapped to its evidence class and reference per
@@ -141,7 +144,8 @@ release milestone `M-REL-NEXT` stays `BLOCKED` until entry criteria hold.
 - **REL-FR-012 (security review)** — Pre-tag review: dependency audit of
   all extras, secrets scan of the tree and built artifacts,
   `SECURITY.md` accuracy check, and review of any new network-facing code
-  (reference server) for safe defaults (loopback binding, synthetic data).
+  (the protocol gateway) for safe defaults (loopback binding, synthetic
+  data, no real credentials).
 - **REL-FR-013 (documentation freeze)** — Docs are frozen with the RC:
   every shipped capability documented, every link valid, statuses of
   design documents updated to reflect reality (a design still unbuilt

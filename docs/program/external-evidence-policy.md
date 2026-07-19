@@ -33,7 +33,8 @@ contract) may build, without any external evidence existing yet:
 - **templates** — manifests, attestations, checklists, report and
   case-study skeletons;
 - **manifests** — implementation queue entries, evidence-manifest
-  scaffolds, integrity manifests over project-generated artifacts;
+  scaffolds, checksum manifests and bundle roots over project-generated
+  artifacts;
 - **evidence collectors** — code that captures, checksums, and archives
   artifacts produced by whoever runs it;
 - **validators** — schema checks, link checks, claim-scan tooling,
@@ -107,8 +108,12 @@ upward.
 Every recorded evidence item carries at least:
 
 **All classes:** stable evidence ID; class; what it evidences; creation
-timestamp; storage location; SHA-256 checksum (or checksummed-bundle
-membership); creator identity.
+timestamp; storage location; integrity binding — either the item's own
+SHA-256 checksum, or membership in an evidence bundle via that bundle's
+`checksums.sha256` and recorded bundle-root checksum (the non-recursive
+integrity model defined in
+[`../design/independent-validation-run.md`](../design/independent-validation-run.md));
+creator identity.
 
 **Repository-generated, additionally:** repository commit SHA and command
 that produced it; seed/configuration where applicable.

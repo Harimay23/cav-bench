@@ -20,13 +20,13 @@ review and shown for context.
 flowchart TB
     subgraph subjects [Evaluation subjects - untrusted]
         LG[LangGraph agent<br/>via adapter, PR 6/8 chain]
-        RS[REST service or<br/>MCP tool server - proposed]
+        RS[REST or MCP candidate<br/>agent or service - proposed]
         BP[Built-in baseline profiles]
     end
 
     subgraph integration [Integration layer - proposed additions]
         LGA[LangGraph adapter<br/>in flight, separate PRs]
-        GPI[Transport connector +<br/>normalized execution adapter<br/>M-GPI-1]
+        GPI[Benchmark-owned protocol gateway<br/>REST / MCP frontends +<br/>shared session core<br/>M-GPI-1]
     end
 
     subgraph core [Existing trusted core - unchanged]
@@ -46,8 +46,9 @@ flowchart TB
     REL[Versioned follow-up release<br/>M-REL-NEXT - proposed]
 
     LG --> LGA --> TF
-    RS <--> GPI
-    GPI --> TF
+    RS -->|protocol requests| GPI
+    GPI -->|one request = one call| TF
+    GPI -.->|authoritative responses| RS
     BP --> TF
     PACKS --> BE
     TF --> BE
@@ -71,12 +72,17 @@ strategies; the LangGraph agent path and protocol-connected services are
 the two integration on-ramps.
 
 **Integration layer**: both the in-flight LangGraph adapter and the
-proposed generic protocol connector
+proposed benchmark-owned protocol gateway
 ([`../design/generic-protocol-integration.md`](../design/generic-protocol-integration.md))
-terminate at the same place — the existing `ToolFacade`. Neither gets a
-private path to state, ledger, or evaluator; that is what keeps
-"the system under evaluation must never grade itself" true across every
-integration.
+terminate at the same place — the existing `ToolFacade`. In the gateway
+topology the candidate is a protocol *client*: it initiates requests,
+the gateway maps each well-formed request to exactly one `ToolFacade`
+call, and the `BenchmarkEnvironment` is the sole executor of every
+consequential effect — the gateway holds no commit path of its own and
+can never manufacture a ledger entry from a candidate claim. Neither
+integration gets a private path to state, ledger, or evaluator; that is
+what keeps "the system under evaluation must never grade itself" true
+across every integration.
 
 **Trusted core** is drawn without change markers because no future
 workstream changes it. `commerce-v1`

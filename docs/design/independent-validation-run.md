@@ -102,11 +102,14 @@ discipline (`docs/strategy/adoption-and-validation-tracking.md`) prohibits.
 - **IVR-FR-005** — The run must produce an evidence bundle containing raw
   artifacts (the complete `runs/<run-id>/` directory: `manifest.json`,
   `traces/`, `evaluations.jsonl`, `summary.json`, `summary.md`) and derived
-  artifacts (the validation-run manifest, integrity manifest, and runner
+  artifacts (the validation-run manifest, integrity files, and runner
   attestation defined below).
-- **IVR-FR-006** — The evidence bundle must include an integrity manifest:
-  a SHA-256 checksum for every file in the bundle, itself checksummed, so
-  post-hoc modification of any artifact is detectable.
+- **IVR-FR-006** — The evidence bundle must carry the non-recursive
+  integrity model defined in [Integrity model](#integrity-model): a
+  `checksums.sha256` manifest covering every bundle file except the
+  excluded integrity files themselves, plus a detached bundle-root
+  checksum over the manifest, so post-hoc modification of any artifact is
+  detectable without self-reference.
 - **IVR-FR-007** — The bundle must include a signed-in-name runner
   attestation (see [Runner attestation](#runner-attestation)) stating who
   ran it, in what category, with what assistance, and what permissions they
@@ -117,7 +120,9 @@ discipline (`docs/strategy/adoption-and-validation-tracking.md`) prohibits.
 - **IVR-FR-009** — A run must end in exactly one terminal state: completed,
   failed, or inconclusive, with the state and its reason recorded.
 - **IVR-FR-010** — Maintainers must perform a reproducibility review of a
-  submitted bundle: verify checksums, re-derive summary metrics from the
+  submitted bundle: verify integrity in the defined verification order
+  (bundle root, manifest format, per-file checksums, no unlisted files),
+  re-derive summary metrics from the
   submitted `evaluations.jsonl`, and (for baseline-profile runs on
   `core-v1`) compare against the canonical ablation expectations.
 - **IVR-FR-011** — Publication of any run detail must respect the runner's
@@ -143,10 +148,10 @@ flowchart LR
     subgraph runner_side [External runner's environment]
         A[Pinned install<br/>tag or commit + pack digest] --> B[Benchmark execution<br/>cavbench validate / run / ablate]
         B --> C[Raw run artifacts<br/>runs/run-id/]
-        C --> D[Evidence bundle assembly<br/>validation-run manifest,<br/>integrity manifest, attestation]
+        C --> D[Evidence bundle assembly<br/>validation-run manifest, attestation,<br/>checksums manifest + detached root]
     end
     D --> E[Submission<br/>issue, archive, or private channel]
-    E --> F[Maintainer reproducibility review<br/>checksum + metric re-derivation]
+    E --> F[Maintainer reproducibility review<br/>root + checksum verification,<br/>metric re-derivation]
     F --> G[Validation tracker entry<br/>+ permitted publication]
 ```
 
@@ -157,7 +162,9 @@ flowchart LR
   private channel required.
 - **Validation-run manifest** (runner-produced): the run's identity,
   pinning, environment, configuration, category, and terminal state.
-- **Integrity manifest** (runner-produced): checksums for every bundle file.
+- **Integrity files** (runner-produced): `checksums.sha256` over every
+  content file, plus the detached `bundle-root.sha256` root (see
+  [Integrity model](#integrity-model)).
 - **Runner attestation** (runner-authored): identity, independence
   statement, assistance disclosure, permissions.
 - **Reproducibility review** (maintainer-performed): integrity and
@@ -198,10 +205,13 @@ step verifies; it never regenerates or repairs runner evidence.
 3. Runner executes the planned run(s) (`cavbench run` / `cavbench ablate`)
    with recorded seeds and options.
 4. Runner assembles the bundle: raw `runs/` output + validation-run
-   manifest + attestation, then generates the integrity manifest last.
+   manifest + attestation, then generates `checksums.sha256` and the
+   detached `bundle-root.sha256` last, in that order (see
+   [Integrity model](#integrity-model)).
 5. Runner submits the bundle (public GitHub issue attachment or archive
    link for public runs; a private channel for restricted runs).
-6. Maintainer verifies checksums, re-derives metrics, records a tracker
+6. Maintainer verifies integrity in the defined order (root, then
+   manifest, then per-file), re-derives metrics, records a tracker
    entry, and publishes only what the disclosure level permits.
 
 ## Interfaces or APIs
@@ -234,7 +244,85 @@ implementation deliverable of the independent-validation tooling milestone.
 | `issues_encountered` | list | Problems hit, with links to filed issues where applicable. |
 | `disclosure_level` | enum | See [Disclosure levels](#privacy-and-disclosure-considerations). |
 | `attestation` | string | Relative path of the attestation document. |
-| `integrity_manifest` | string | Relative path of the checksum manifest. |
+| `integrity_manifest` | string | Relative path of `checksums.sha256`. Note: the bundle-root checksum is **not** a manifest field — the manifest is itself covered by `checksums.sha256`, so embedding the root would be self-referential. The root lives only in the detached `bundle-root.sha256` file and in external records. |
+
+### Integrity model
+
+The bundle's integrity design is deliberately non-recursive: a flat
+checksum manifest over content files, and a single detached root over
+that manifest. This model is shared by every evidence bundle in the
+program (validation runs, hidden-failure baselines, retest bundles).
+
+**Coverage.** `checksums.sha256`, at the bundle root directory, lists a
+SHA-256 checksum for **every regular file in the bundle except**:
+`checksums.sha256` itself, `bundle-root.sha256`, and any detached
+signature file (`checksums.sha256.sig`). Nothing else is exempt; empty
+directories are not represented (and therefore not integrity-protected —
+bundles must not carry meaning in empty directories).
+
+**Format.** One line per file:
+`<lowercase-hex-sha256><space><space><relative-path>` — the
+GNU-`sha256sum`-compatible two-space form. Paths are relative to the
+bundle root, use `/` separators on all platforms, contain no leading
+`./`, and must not contain newline characters. Lines are ordered by
+byte-wise lexicographic comparison of the UTF-8-encoded relative path
+(no locale-dependent collation). The file is UTF-8 without BOM, LF line
+endings only, exactly one line per entry, and ends with a single
+trailing LF. Checksums are computed over exact file bytes — generators
+must never normalize the line endings or encoding of the *content*
+files they hash.
+
+**Bundle root.** `bundle-root.sha256` contains one line: the
+lowercase-hex SHA-256 of the exact bytes of `checksums.sha256`, in the
+same two-space format (`<hex>  checksums.sha256`), UTF-8, LF, single
+trailing newline. This root value — a single hash — is what external
+records store (finding records, version-controlled references, tracker
+entries). Because the manifest's format above is fully canonical, the
+root is deterministic: two independently generated manifests over
+identical file trees are byte-identical, and so are their roots. A
+Merkle tree is not required at these bundle sizes; if a future revision
+needs partial verification of very large bundles, a Merkle-root variant
+may replace the flat root through a documented format-version bump.
+
+**Archive normalization.** Integrity binds the file *tree*, not any
+archive representation of it. When a bundle is transported as an archive
+(`.tar.gz`, `.zip`), verification is performed over the extracted tree;
+archive-level bytes are unconstrained. Archive creators are encouraged
+(not required) to produce deterministic archives — sorted entries, fixed
+timestamps, no owner/group metadata — but no integrity claim ever rests
+on the archive file's own hash. Extraction for verification must use
+path-traversal-safe tooling and must reject absolute paths and `..`
+components.
+
+**Optional signature.** A runner may add a detached signature
+(`checksums.sha256.sig`, e.g. GPG or SSH signature) over the exact bytes
+of `checksums.sha256`. The signature strengthens attribution of the
+attestation; it does not replace the recorded root, and its absence is
+not a defect. Signature files are excluded from coverage (above) and
+verified, when present, after the root check.
+
+**Generation order.** Assemble all content files first; generate
+`checksums.sha256`; generate `bundle-root.sha256`; optionally sign.
+Any later change to any content file requires regenerating both files
+(and re-signing), which changes the root — that is the tamper-evidence
+property working, and is why external records store the root at freeze
+time.
+
+**Verification order.** 1) Hash `checksums.sha256` and compare against
+the externally recorded root (falling back to `bundle-root.sha256` only
+when no external record exists — the detached file inside the bundle
+proves internal consistency, not freeze-time provenance); 2) verify the
+signature if present; 3) parse the manifest, rejecting format
+violations (ordering, encoding, duplicates); 4) hash every listed file
+and compare; 5) enumerate the tree and confirm no unlisted files exist
+beyond the three excluded names.
+
+**Tamper detection.** Any failure — root mismatch, signature failure,
+format violation, per-file mismatch, missing listed file, or unlisted
+extra file — makes the bundle **integrity-failed**: the run's review
+outcome is `inconclusive`, nothing in the bundle may be cited as
+evidence, and recovery is a fresh run producing a fresh bundle, never a
+repaired one.
 
 ### Runner attestation
 
@@ -309,9 +397,9 @@ in `assistance_received` and let the review classify it.
   not "fix" locally; capture the bundle as-is and file an issue. This is a
   **stop condition** for the project (canonical results unexpectedly
   changing, per `CLAUDE.md`).
-- Checksum mismatch discovered at review → bundle integrity is broken;
-  review outcome is `inconclusive`; a fresh run is required, not a repaired
-  bundle.
+- Integrity failure discovered at review (root mismatch, manifest format
+  violation, per-file mismatch, or unlisted files) → review outcome is
+  `inconclusive`; a fresh run is required, not a repaired bundle.
 - Category dispute (assistance not disclosed, or disclosed assistance
   arguably out of bounds) → resolve conservatively: the lower category
   applies.
@@ -360,22 +448,23 @@ project once published.
 - For baseline-profile runs of `core-v1`, summary metrics must be
   bit-comparable to the canonical expectations for that version; any
   deviation is a finding, never something to normalize away.
-- The integrity manifest makes the bundle tamper-evident from the moment of
-  assembly.
+- The checksum manifest and its externally recorded bundle root make the
+  bundle tamper-evident from the moment of assembly.
 
 ## Observability and audit evidence
 
 The bundle is the audit trail: raw traces, evaluations, and summaries; the
 validation-run manifest; captured command output for `doctor` and
-`validate`; the dependency freeze; the attestation; and the checksum
-manifest. The project-side tracker entry records review results and
+`validate`; the dependency freeze; the attestation; `checksums.sha256`;
+and `bundle-root.sha256`. The project-side tracker entry records review results and
 category determination, with a pointer to where the bundle is archived.
 
 ## Test strategy
 
 For this design (documentation): relative-link validation and terminology
-consistency. For the future tooling milestone: unit tests for manifest
-generation and checksum verification; an integration test that packages a
+consistency. For the future tooling milestone: unit tests for checksum-manifest
+generation (canonical ordering, encoding, exclusions), root generation,
+and the full verification order; an integration test that packages a
 real `cavbench ablate` output into a bundle and round-trips verification;
 a negative test that a modified file fails integrity review. A project-team
 **dry run** — a maintainer following the runner documentation exactly, on a
@@ -391,8 +480,9 @@ This design is complete when:
    public documentation.
 2. The rubric classifies the dry run as `project_self_run` without judgment
    calls.
-3. Review of the dry-run bundle re-derives summary metrics from
-   `evaluations.jsonl` and matches checksums.
+3. Review of the dry-run bundle passes the full verification order
+   (root, manifest, per-file, no unlisted files) and re-derives summary
+   metrics from `evaluations.jsonl`.
 4. An external reviewer of this document can state what they would have to
    do to conduct an independent run, without asking clarifying questions.
 
@@ -404,8 +494,9 @@ external, non-automatable event.
 
 1. **Design approval** (this document, via human review of the docs PR).
 2. **Tooling** (separate milestone `M-IVT-1`,
-   `docs/program/implementation-manifest.md`): bundle packager, checksum
-   generator/verifier, manifest template, runner quick-start.
+   `docs/program/implementation-manifest.md`): bundle packager,
+   checksum-manifest and bundle-root generator/verifier, manifest
+   template, runner quick-start.
 3. **Rehearsal**: maintainer dry run; fix friction found.
 4. **External availability**: publish the runner quick-start; support
    boundary in effect.

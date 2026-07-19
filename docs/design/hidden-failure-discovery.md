@@ -23,9 +23,13 @@ gap against a real subject: a candidate agent system is run through
 scenarios via an adapter; a conventional outcome check and the CAV-Bench
 evaluation are captured for the same episode; an evidence correlator aligns
 the two on the benchmark's own trace and ledger; and a classifier —
-strictly downstream of the evaluator, never overriding it — produces a
-validated finding record with confidence, severity, operational
-consequence, and a reproduction status. Findings pass false-positive
+strictly downstream of the evaluator, never overriding it — assigns each
+discrepancy to explicit finding classes (`validity_gap`,
+`hidden_invalid_commit`, `false_success_report`, `recovery_failure`)
+with benchmark-owned predicates, and produces a validated finding record
+with confidence, severity, operational consequence, and a reproduction
+status. Only a `hidden_invalid_commit` finding can satisfy the roadmap's
+hidden consequential-action-failure outcome. Findings pass false-positive
 review and causal-boundary analysis before they may be called hidden
 failures, and disclosure follows the external-evidence policy.
 
@@ -115,17 +119,30 @@ uncontrolled evaluator.
   benchmark evidence (trace events, ledger entries, state-version history)
   supporting each failed dimension — by reference into the run artifacts,
   never by copy-editing them.
-- **HFD-FR-006** — A **hidden-failure candidate** is classified if and only
-  if: conventional outcome = pass AND CAV-Bench result shows at least one
-  invalid consequential commit or failed validity dimension on the same
-  episode. Both facts must be evaluator-/environment-derived.
+- **HFD-FR-006** — A **finding candidate** exists if and only if the
+  episode satisfies the `validity_gap` predicate (conventional outcome =
+  pass AND the episode is not commit-valid). Every candidate must
+  additionally be assigned all applicable finding classes from
+  [Finding classes and predicates](#finding-classes-and-predicates), and
+  exactly one `primary_class`. All classification inputs must be
+  evaluator-/environment-derived; the classes are labels over evaluator
+  output, never new validity semantics.
+- **HFD-FR-006a** — Only a finding whose `primary_class` is
+  `hidden_invalid_commit` may be counted toward, or described as, the
+  roadmap's "hidden consequential-action failure" outcome. Broadening
+  that outcome to other classes requires a separate, recorded design
+  decision (`DECISION_LOG.md` process), not a classification judgment
+  call.
 - **HFD-FR-007** — Every candidate finding must receive a confidence grade
   and severity grade per the scales below, with the grading rationale
   recorded.
 - **HFD-FR-008** — Every candidate finding must pass false-positive review
   before validation: scenario-applicability check, adapter-fidelity check
   (did the adapter faithfully translate the subject's behavior, or
-  manufacture the failure?), and oracle-correctness check.
+  manufacture the failure?), oracle-correctness check, and a
+  class-verification check (each recorded class's predicate re-confirmed
+  against the referenced artifacts; a misclassed candidate is corrected,
+  not discarded).
 - **HFD-FR-009** — Causal-boundary analysis must attribute the failure to a
   layer — subject system logic, framework behavior, adapter translation, or
   scenario/oracle defect — and only subject/framework attributions may be
@@ -164,7 +181,7 @@ flowchart LR
     B --> D[Conventional outcome check<br/>OSR / subject's own verdict]
     C --> E[Evidence correlator<br/>per-episode alignment on<br/>trace + ledger references]
     D --> E
-    E --> F[Hidden-failure classifier<br/>outcome-pass AND commit-invalid<br/>+ confidence, severity]
+    E --> F[Finding classifier<br/>class predicates: validity_gap,<br/>hidden_invalid_commit,<br/>false_success_report, recovery_failure<br/>+ confidence, severity]
     F --> G[False-positive review<br/>+ causal-boundary analysis]
     G --> H[Validated finding record]
     H --> I[Remediation handoff<br/>improvement-case workstream]
@@ -187,8 +204,9 @@ results. There is no path by which classification feeds back into scoring.
 - **Evidence correlator** — builds per-episode records referencing (by
   run-id, scenario-id, event index, ledger entry) the artifacts supporting
   each discrepancy.
-- **Hidden-failure classifier** — applies HFD-FR-006 mechanically; attaches
-  confidence/severity with recorded rationale.
+- **Finding classifier** — applies the class predicates of HFD-FR-006
+  mechanically and selects `primary_class`; attaches confidence/severity
+  with recorded rationale.
 - **False-positive review & causal-boundary analysis** — human step;
   produces the attribution and the validation decision.
 - **Finding record store** — append-only finding records; restricted or
@@ -223,8 +241,10 @@ without them). The candidate system is entirely external.
 ## Data and evidence flow
 
 1. Intake record created (restricted store if the owner requires it).
-2. Baseline captured and archived with an integrity manifest (reusing the
-   bundle format from `docs/design/independent-validation-run.md`).
+2. Baseline captured and archived under the non-recursive integrity
+   model of `docs/design/independent-validation-run.md` (checksum
+   manifest + detached bundle root); the bundle root is recorded in the
+   intake/finding records at capture time.
 3. Runs executed; artifacts archived unmodified.
 4. Correlator emits per-episode correlation records.
 5. Classifier emits candidate findings.
@@ -235,7 +255,38 @@ without them). The candidate system is entirely external.
 
 ## Interfaces or APIs
 
-No new runtime APIs. The new interface is the finding record.
+No new runtime APIs. The new interfaces are the finding classes and the
+finding record.
+
+### Finding classes and predicates
+
+For an episode `E`, all predicate inputs are benchmark-owned facts from
+the evaluator result and canonical trace: `conventional_pass(E)` (the
+recorded conventional verdict, default source OSR, per HFD-FR-003);
+`commit_valid(E)` (the episode passes every applicable validity
+dimension for every consequential commit — the episode-level fact CVSR
+aggregates); `invalid_commits(E)` (the set of ledger-committed effects
+the evaluator marked invalid: a stale-witness commit per D-015
+mechanics, a duplicate side effect derived from ledger cardinality, a
+committed forbidden/out-of-scope effect, or a commit made after
+authority no longer held); the evaluator's failure codes; and the
+declared recovery obligations.
+
+| Class | Predicate (benchmark-owned) | What it captures |
+|---|---|---|
+| `validity_gap` | `conventional_pass(E) ∧ ¬commit_valid(E)` | The umbrella condition: outcome testing says pass, commit-validity evaluation says otherwise. Every finding candidate satisfies it by definition (HFD-FR-006). |
+| `hidden_invalid_commit` | `conventional_pass(E) ∧ invalid_commits(E) ≠ ∅` | A consequential effect **actually committed to the ledger** was invalid, yet the outcome looked fine. This is the hidden committed-effect failure the document's problem statement describes. |
+| `false_success_report` | `conventional_pass(E) ∧ OR_FALSE_SUCCESS_REPORT ∈ failure_codes(E)` | The subject reported completion better than the benchmark-derived floor (D-017), independent of whether any commit was invalid. |
+| `recovery_failure` | `conventional_pass(E) ∧ outcome_recoverability failed for at least one non-reporting reason` — an unmet declared recovery obligation, an ambiguous operation never reconciled, or a required compensation/escalation absent or failed | A recovery-path failure hidden behind a passing outcome, with no invalid commit required. |
+
+Rules: classes other than `validity_gap` may co-occur and all applicable
+classes are recorded. `primary_class` is `hidden_invalid_commit` when
+its predicate holds; otherwise `false_success_report` or
+`recovery_failure` (whichever is graded operationally dominant, with the
+choice's rationale recorded); otherwise `validity_gap` alone. Per
+HFD-FR-006a, only `primary_class: hidden_invalid_commit` can satisfy
+the roadmap's hidden consequential-action-failure outcome — the other
+classes are real, reportable findings, but they are not that outcome.
 
 ### Finding-record schema
 
@@ -249,7 +300,9 @@ tooling deliverable):
 | `scenario_or_profile` | string | Scenario ID(s) and pack, or applied profile. |
 | `subject_system` | object | System name (or anonymized handle), version, framework, adapter + adapter version, configuration reference. |
 | `conventional_outcome` | object | `verdict` (pass/fail), `source` (`osr` \| `subject_test_suite` \| `both`), reference to the recorded check. |
-| `cavbench_result` | object | Per-dimension status, invalid-commit flag, metrics for the episode — copied verbatim with a reference to `evaluations.jsonl`. |
+| `cavbench_result` | object | Per-dimension status, invalid-commit detail, metrics for the episode — copied verbatim with a reference to `evaluations.jsonl`. |
+| `finding_classes` | list | All applicable classes per [Finding classes and predicates](#finding-classes-and-predicates). Must include `validity_gap`. |
+| `primary_class` | enum | `hidden_invalid_commit` \| `false_success_report` \| `recovery_failure` \| `validity_gap`, selected per the class rules. |
 | `failure_codes` | list | Evaluator failure codes observed (e.g. `OR_FALSE_SUCCESS_REPORT`), by reference. |
 | `authoritative_evidence` | list | References into trace events, ledger entries, and state-version history supporting each failed dimension. |
 | `causal_attribution` | enum | `subject_logic` \| `framework_behavior` \| `adapter_translation` \| `scenario_or_oracle_defect`. |
@@ -265,7 +318,10 @@ tooling deliverable):
 ### Confidence scale
 
 - `high` — reproduced deterministically; evidence chain complete;
-  attribution unambiguous after review.
+  attribution unambiguous after review; every recorded class's predicate
+  verified directly against the referenced ledger/trace artifacts (for
+  `hidden_invalid_commit`, the specific invalid ledger entries are
+  individually referenced).
 - `medium` — reproduced, but attribution between subject and framework is
   uncertain, or evidence is complete for only one failed dimension.
 - `low` — observed once or attribution unresolved; not publishable as a
@@ -290,9 +346,13 @@ Finding lifecycle:
 any state `→ withdrawn` (false positive discovered) or `→ stale`.
 
 Only `validated` findings with `reproduction_status: reproduced` and
-completed review may be described, at their disclosure level, as hidden
-failures. `rejected` and `withdrawn` records are retained — they calibrate
-the false-positive rate.
+completed review may be published, at their disclosure level, and each is
+described by its class — a `recovery_failure` is reported as a recovery
+failure, not as a hidden invalid commit. Only a validated, reproduced
+finding with `primary_class: hidden_invalid_commit` may be described as
+a hidden consequential-action failure (HFD-FR-006a). `rejected` and
+`withdrawn` records are retained — they calibrate the false-positive
+rate.
 
 ## Failure modes
 
@@ -356,9 +416,11 @@ walk back to raw trace events and ledger entries.
 
 ## Test strategy
 
-Tooling-milestone tests (separate implementation PR): unit tests for the
-classifier predicate (outcome-pass ∧ commit-invalid) over synthetic
-evaluation results, including all four causal attributions; a contract test
+Tooling-milestone tests (separate implementation PR): unit tests for every
+class predicate (`validity_gap`, `hidden_invalid_commit`,
+`false_success_report`, `recovery_failure`) and for `primary_class`
+selection over synthetic evaluation results, including co-occurring
+classes and all four causal attributions; a contract test
 that the classifier cannot mutate evaluation results (mirroring
 `tests/contract/test_evaluator_independence.py` in spirit); an integration
 test running a baseline profile known to produce a Validity Gap (e.g.
@@ -370,15 +432,21 @@ candidate is produced.
 ## Acceptance criteria
 
 1. A synthetic end-to-end demonstration: a deliberately unguarded
-   configuration produces a candidate finding whose every validity
-   assertion carries a working evidence reference (this uses baseline
-   profiles and is explicitly labeled a demonstration, not a discovery).
-2. False-positive review rejects a seeded adapter-translation defect.
+   configuration produces candidate findings whose every validity
+   assertion carries a working evidence reference, with correct class
+   assignment — at least one `hidden_invalid_commit` (e.g. `direct` on a
+   `state_mutation` scenario) and at least one candidate of a different
+   primary class (e.g. a `recovery_failure`), demonstrating the classes
+   separate (this uses baseline profiles and is explicitly labeled a
+   demonstration, not a discovery).
+2. False-positive review rejects a seeded adapter-translation defect, and
+   class-verification review corrects a deliberately misclassed fixture.
 3. A finding record passes an external reviewer's audit walk without
    requiring project-team explanation.
-4. The roadmap outcome is met only when a `validated`, `reproduced` finding
-   exists for a real external candidate system — an externally-dependent
-   event that automation cannot claim
+4. The roadmap outcome is met only when a `validated`, `reproduced`
+   finding with `primary_class: hidden_invalid_commit` exists for a real
+   external candidate system — an externally-dependent event that
+   automation cannot claim
    (`docs/program/external-evidence-policy.md`).
 
 ## Delivery phases
@@ -414,12 +482,16 @@ the program window; the tooling remains valid and waiting.
 
 ## Explicit claims and non-claims
 
-Supported claim shape, once evidence exists: "In a controlled CAV-Bench
-evaluation of <subject/anonymized subject> at <version>, an episode that
-passed conventional outcome checking contained a commit-invalid action
-(<dimension>, <failure code>), evidence archived at <reference>."
+Supported claim shape, once evidence exists (for a
+`hidden_invalid_commit` finding): "In a controlled CAV-Bench evaluation
+of <subject/anonymized subject> at <version>, an episode that passed
+conventional outcome checking committed an invalid consequential action
+(<dimension>, <failure code>, ledger entries <references>), evidence
+archived at <reference>." Findings of other classes use claim shapes
+scoped to their class (a false-success report, a hidden recovery
+failure) and are never presented as hidden invalid commits.
 
-Non-claims: no hidden failure in any real external system has been
+Non-claims: no hidden failure of any class in any real external system has been
 discovered as of this document; the synthetic baseline demonstration is not
 a discovery; a validated finding is not an incident-frequency estimate, a
 framework ranking, or a statement about production reliability; and no

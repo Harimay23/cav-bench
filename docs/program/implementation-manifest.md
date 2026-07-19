@@ -77,40 +77,51 @@ its own PRs, and must not be modified by executors working this queue.
 ## M-GPI-1 — Generic protocol integration
 
 - **milestone_id:** `M-GPI-1`
-- **title:** Implement the shared integration core, first transport, and reference server
+- **title:** Implement the benchmark-owned protocol gateway (shared core + first transport frontend) and reference candidate client
 - **design document:** [`../design/generic-protocol-integration.md`](../design/generic-protocol-integration.md)
 - **issue placeholder:** `ISSUE-TBD-GPI-1`
 - **branch name (proposed):** `feat/generic-protocol-integration`
 - **PR title (proposed):** `feat: add generic protocol integration core with first transport`
 - **dependency milestones:** none in this queue; requires design
-  approval, including confirmation of the proposed REST-first transport
-  order, and a `DECISION_LOG.md` entry at implementation time (per
-  `AGENTS.md` scope discipline).
+  approval, including confirmation of the proposed gateway-mediated
+  topology and REST-first transport order, and a `DECISION_LOG.md` entry
+  at implementation time recording both (per `AGENTS.md` scope
+  discipline).
 - **initial status:** `AWAITING_DESIGN_REVIEW`
-- **allowed actions:** new optional-extra modules for the connector core
-  and first transport; deterministic reference server (examples-adjacent);
-  CI example job; documentation; changelog + decision-log entries.
+- **allowed actions:** new optional-extra modules for the gateway core
+  and first transport frontend; deterministic reference candidate client
+  (examples-adjacent); CI example job; documentation; changelog +
+  decision-log entries.
 - **prohibited actions:** changes to evaluator/runtime semantics; core
-  (non-extra) dependencies; trusting wire-supplied status as commit
-  truth; network egress beyond loopback in benchmark mode.
-- **implementation deliverables:** envelope schema + docs; normalized
-  execution adapter; first transport connector; reference server;
-  transport mapping documentation; CI example.
-- **required tests:** envelope/normalization unit tests; identity-under-
-  retry tests; redaction tests; adversarial forged-commit-claim contract
-  test; reference-server integration tests over the four hazard
-  patterns; determinism (double-run hash) check; extras-isolation import
-  test; full quality gate.
+  (non-extra) dependencies; any commit path outside
+  `ToolFacade → BenchmarkEnvironment`; deriving any ledger entry from a
+  candidate claim; gateway-side retries, identity repair, or
+  reconciliation on the candidate's behalf; network egress beyond
+  loopback in benchmark mode.
+- **implementation deliverables:** envelope schema + docs; shared
+  gateway core (session binding, 1:1 request-to-ToolFacade mapping,
+  session log); first transport frontend; reference candidate client;
+  candidate-facing mapping documentation; CI example.
+- **required tests:** envelope/normalization unit tests; identity
+  pass-through (no mutation) tests; redaction tests; adversarial
+  forged-final-report contract test; gateway neutrality tests (exact 1:1
+  request↔attempt correspondence, no unrequested reconciliation or
+  retries); malformed-request tests (no benchmark attempt created);
+  reference-candidate integration tests over the four hazard patterns in
+  guarded and flawed configurations; determinism (double-run hash)
+  check; extras-isolation import test; full quality gate.
 - **required external input:** design approval; transport-order
   confirmation; external technical review before the integration is
   represented as usable.
-- **stop condition:** faithful translation would require evaluator
-  changes or adapter-supplied truth — pause and escalate.
+- **stop condition:** protocol conformance would require the gateway to
+  break behavioral neutrality, add a commit path, or treat candidate
+  claims as truth — pause and escalate.
 - **merge prerequisites:** human PR review and approval; CI green
   including the new example job.
 - **completion evidence:** merged PR; deterministic CI example passing;
-  recorded external technical review of the mappings (external input —
-  until it exists, the milestone stops at `VALIDATING`).
+  recorded external technical review of the envelope and gateway
+  mappings (external input — until it exists, the milestone stops at
+  `VALIDATING`).
 
 ---
 
@@ -129,16 +140,21 @@ its own PRs, and must not be modified by executors working this queue.
   runtime merge (outside this queue) or `M-GPI-1`.
 - **initial status:** `PROPOSED`
 - **allowed actions:** manifest/attestation templates and (if approved in
-  design review) machine schemas; bundle packager + checksum
-  generator/verifier; runner quick-start docs; tests; changelog.
+  design review) machine schemas; bundle packager; checksum-manifest and
+  detached-bundle-root generator/verifier implementing the non-recursive
+  integrity model; runner quick-start docs; tests; changelog.
 - **prohibited actions:** anything that lets project tooling alter or
   regenerate runner evidence; claims that a run occurred.
 - **implementation deliverables:** validation-run manifest template,
-  integrity-manifest tooling, attestation template, runner quick-start,
-  reproducibility-review checklist.
+  integrity tooling (`checksums.sha256` + `bundle-root.sha256`
+  generation and full verification order), attestation template, runner
+  quick-start, reproducibility-review checklist.
 - **required tests:** packaging round-trip on a real `cavbench ablate`
-  output; tamper-detection negative test; template/schema validation;
-  full quality gate.
+  output; canonical-manifest determinism test (two independent
+  generations over the same tree are byte-identical); tamper-detection
+  negative tests for every verification step (root mismatch, format
+  violation, per-file mismatch, unlisted file); template/schema
+  validation; full quality gate.
 - **required external input:** design approval. (The *tooling* completes
   without an external run; the roadmap *outcome* additionally requires a
   real `independent_external` bundle — tracked on this entry's
@@ -162,8 +178,9 @@ its own PRs, and must not be modified by executors working this queue.
 - **issue placeholder:** `ISSUE-TBD-HFA-1`
 - **branch name (proposed):** `feat/hidden-failure-analysis`
 - **PR title (proposed):** `feat: add hidden-failure evidence correlation and finding tooling`
-- **dependency milestones:** `M-IVT-1` (reuses the bundle/integrity
-  format); an executable integration for real candidates.
+- **dependency milestones:** `M-IVT-1` (reuses the bundle format and
+  non-recursive integrity model); an executable integration for real
+  candidates.
 - **initial status:** `PROPOSED`
 - **allowed actions:** analysis-layer modules (placement per design
   review), finding-record templates, pipeline tests, synthetic
@@ -174,10 +191,13 @@ its own PRs, and must not be modified by executors working this queue.
 - **implementation deliverables:** correlator, classifier, finding-record
   schema/templates, false-positive review checklist, synthetic
   demonstration.
-- **required tests:** classifier predicate unit tests (incl. all causal
-  attributions); classifier-immutability contract test; end-to-end
-  pipeline test over a Validity-Gap-producing baseline run;
-  false-positive fixture test; full quality gate.
+- **required tests:** per-class predicate unit tests (`validity_gap`,
+  `hidden_invalid_commit`, `false_success_report`, `recovery_failure`)
+  and `primary_class` selection tests, incl. co-occurring classes and
+  all causal attributions; classifier-immutability contract test;
+  end-to-end pipeline test over a Validity-Gap-producing baseline run
+  asserting correct class assignment; false-positive and misclassed
+  fixture tests; full quality gate.
 - **required external input:** design approval; later, candidate-owner
   consent for any real evaluation.
 - **stop condition:** correct classification would require evaluator
@@ -185,9 +205,12 @@ its own PRs, and must not be modified by executors working this queue.
 - **merge prerequisites:** human PR review and approval; CI green.
 - **completion evidence:** merged PR + passing synthetic demonstration.
   **A hidden-failure discovery is evidence-complete only with a
-  `validated`, `reproduced` finding against a real external candidate,
-  with preserved evidence** — the milestone parks at `VALIDATING` /
-  `BLOCKED_EXTERNAL_INPUT` until that exists.
+  `validated`, `reproduced` finding of
+  `primary_class: hidden_invalid_commit` against a real external
+  candidate, with preserved evidence** (HFD-FR-006a; other finding
+  classes are reportable but do not satisfy the roadmap outcome) — the
+  milestone parks at `VALIDATING` / `BLOCKED_EXTERNAL_INPUT` until that
+  exists.
 
 ---
 
@@ -211,7 +234,8 @@ its own PRs, and must not be modified by executors working this queue.
 - **implementation deliverables:** comparison engine + templates +
   rehearsal, per the design's tooling phase.
 - **required tests:** diff unit tests (improve/regress/mixed/no-change);
-  checksum-mismatch failure test; hypothesis-ordering warning test;
+  bundle verification-order failure tests (root mismatch and per-file
+  mismatch both abort the comparison); hypothesis-ordering warning test;
   labeled two-profile rehearsal; full quality gate.
 - **required external input:** design approval. The tooling is buildable
   once approved; **an improvement case remains externally blocked until a
