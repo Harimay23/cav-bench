@@ -26,7 +26,8 @@ the two on the benchmark's own trace and ledger; and a classifier —
 strictly downstream of the evaluator, never overriding it — assigns each
 discrepancy to explicit finding classes (`validity_gap`,
 `hidden_invalid_commit`, `false_success_report`, `recovery_failure`)
-with benchmark-owned predicates, and produces a validated finding record
+with benchmark-owned predicates, computes a single `primary_class` by a
+fixed precedence ordering, and produces a validated finding record
 with confidence, severity, operational consequence, and a reproduction
 status. Only a `hidden_invalid_commit` finding can satisfy the roadmap's
 hidden consequential-action-failure outcome. Findings pass false-positive
@@ -124,9 +125,11 @@ uncontrolled evaluator.
   pass AND the episode is not commit-valid). Every candidate must
   additionally be assigned all applicable finding classes from
   [Finding classes and predicates](#finding-classes-and-predicates), and
-  exactly one `primary_class`. All classification inputs must be
-  evaluator-/environment-derived; the classes are labels over evaluator
-  output, never new validity semantics.
+  exactly one `primary_class` computed mechanically by the fixed
+  precedence ordering defined there — never by judgment. All
+  classification inputs must be evaluator-/environment-derived; the
+  classes are labels over evaluator output, never new validity
+  semantics.
 - **HFD-FR-006a** — Only a finding whose `primary_class` is
   `hidden_invalid_commit` may be counted toward, or described as, the
   roadmap's "hidden consequential-action failure" outcome. Broadening
@@ -153,8 +156,9 @@ uncontrolled evaluator.
   reproduction recorded; findings that do not reproduce stay
   `unreproduced` and may not be published as findings.
 - **HFD-FR-011** — Finding review must be recorded: who reviewed, what was
-  checked, outcome. External review is required before any public claim
-  that a hidden failure was discovered.
+  checked, outcome, and any `reviewer_emphasis` (with rationale).
+  External review is required before any public claim that a hidden
+  failure was discovered.
 - **HFD-FR-012** — Remediation handoff must deliver the finding record and
   its evidence references to the system owner, and record their response
   (accepted, disputed, deferred), feeding the improvement-case workstream.
@@ -205,8 +209,9 @@ results. There is no path by which classification feeds back into scoring.
   run-id, scenario-id, event index, ledger entry) the artifacts supporting
   each discrepancy.
 - **Finding classifier** — applies the class predicates of HFD-FR-006
-  mechanically and selects `primary_class`; attaches confidence/severity
-  with recorded rationale.
+  mechanically and computes `primary_class` by the fixed precedence
+  ordering; attaches confidence/severity with recorded rationale. It
+  never sets `reviewer_emphasis` — that field is human-review-only.
 - **False-positive review & causal-boundary analysis** — human step;
   produces the attribution and the validation decision.
 - **Finding record store** — append-only finding records; restricted or
@@ -280,13 +285,36 @@ declared recovery obligations.
 | `recovery_failure` | `conventional_pass(E) ∧ outcome_recoverability failed for at least one non-reporting reason` — an unmet declared recovery obligation, an ambiguous operation never reconciled, or a required compensation/escalation absent or failed | A recovery-path failure hidden behind a passing outcome, with no invalid commit required. |
 
 Rules: classes other than `validity_gap` may co-occur and all applicable
-classes are recorded. `primary_class` is `hidden_invalid_commit` when
-its predicate holds; otherwise `false_success_report` or
-`recovery_failure` (whichever is graded operationally dominant, with the
-choice's rationale recorded); otherwise `validity_gap` alone. Per
-HFD-FR-006a, only `primary_class: hidden_invalid_commit` can satisfy
+classes are recorded. `primary_class` is computed by a **fixed
+precedence ordering** — the highest-precedence class whose predicate
+holds:
+
+1. `hidden_invalid_commit`
+2. `recovery_failure`
+3. `false_success_report`
+4. `validity_gap`
+
+The ordering is part of the classifier's mechanical specification:
+given identical artifacts, `finding_classes` and `primary_class` are
+identical, with no judgment step. (The rationale for placing
+`recovery_failure` above `false_success_report`: an unrecovered
+partial state is an unresolved external hazard, while a false report
+about an otherwise-handled episode is a reporting defect; when both
+hold, the finding record's `finding_classes` still shows both.)
+
+Where a human reviewer judges that a lower-precedence class is the
+operationally more important story of a finding, they record that in the
+optional `reviewer_emphasis` field (class + written rationale) during
+review. `reviewer_emphasis` is commentary only: it never alters
+`finding_classes`, `primary_class`, evaluator output, roadmap
+eligibility, confidence predicates, or any benchmark truth, and no
+downstream process (improvement-case entry, manifest completion
+evidence, release claims) may key on it in place of `primary_class`.
+
+Per HFD-FR-006a, only `primary_class: hidden_invalid_commit` can satisfy
 the roadmap's hidden consequential-action-failure outcome — the other
-classes are real, reportable findings, but they are not that outcome.
+classes are real, reportable findings, but they are not that outcome,
+and `reviewer_emphasis` cannot promote a finding into it.
 
 ### Finding-record schema
 
@@ -302,7 +330,8 @@ tooling deliverable):
 | `conventional_outcome` | object | `verdict` (pass/fail), `source` (`osr` \| `subject_test_suite` \| `both`), reference to the recorded check. |
 | `cavbench_result` | object | Per-dimension status, invalid-commit detail, metrics for the episode — copied verbatim with a reference to `evaluations.jsonl`. |
 | `finding_classes` | list | All applicable classes per [Finding classes and predicates](#finding-classes-and-predicates). Must include `validity_gap`. |
-| `primary_class` | enum | `hidden_invalid_commit` \| `false_success_report` \| `recovery_failure` \| `validity_gap`, selected per the class rules. |
+| `primary_class` | enum | `hidden_invalid_commit` \| `recovery_failure` \| `false_success_report` \| `validity_gap` — the highest-precedence applicable class per the fixed ordering in [Finding classes and predicates](#finding-classes-and-predicates); machine-computed, never hand-selected. |
+| `reviewer_emphasis` | object (optional) | Review-time commentary: `class` (one of the recorded `finding_classes`) + `rationale`. Never affects `finding_classes`, `primary_class`, roadmap eligibility, confidence, or any benchmark truth. |
 | `failure_codes` | list | Evaluator failure codes observed (e.g. `OR_FALSE_SUCCESS_REPORT`), by reference. |
 | `authoritative_evidence` | list | References into trace events, ledger entries, and state-version history supporting each failed dimension. |
 | `causal_attribution` | enum | `subject_logic` \| `framework_behavior` \| `adapter_translation` \| `scenario_or_oracle_defect`. |
@@ -402,8 +431,11 @@ details. The validation tracker's public/restricted split governs storage.
 
 Given the archived baseline (versions, digests, seeds, configuration), the
 runner, evaluator, correlator, and classifier must reproduce the identical
-finding candidates. Human review steps are recorded but not required to be
-deterministic. Confidence `high` requires demonstrated reproduction, not
+finding candidates — including identical `finding_classes` and
+`primary_class`, since primary-class selection is the fixed precedence
+ordering, not a judgment. Human review steps (including any
+`reviewer_emphasis`) are recorded but not required to be deterministic,
+and cannot change machine-classified fields. Confidence `high` requires demonstrated reproduction, not
 assumed determinism.
 
 ## Observability and audit evidence
@@ -418,9 +450,13 @@ walk back to raw trace events and ledger entries.
 
 Tooling-milestone tests (separate implementation PR): unit tests for every
 class predicate (`validity_gap`, `hidden_invalid_commit`,
-`false_success_report`, `recovery_failure`) and for `primary_class`
-selection over synthetic evaluation results, including co-occurring
-classes and all four causal attributions; a contract test
+`false_success_report`, `recovery_failure`) and for fixed-precedence
+`primary_class` computation over synthetic evaluation results,
+including every co-occurrence combination (in particular
+`recovery_failure` + `false_success_report` resolving to
+`recovery_failure`) and all four causal attributions; a schema-level
+test that `reviewer_emphasis` is absent from classifier output and
+ignored by any tooling that computes eligibility; a contract test
 that the classifier cannot mutate evaluation results (mirroring
 `tests/contract/test_evaluator_independence.py` in spirit); an integration
 test running a baseline profile known to produce a Validity Gap (e.g.

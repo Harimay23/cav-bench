@@ -193,8 +193,10 @@ its own PRs, and must not be modified by executors working this queue.
   demonstration.
 - **required tests:** per-class predicate unit tests (`validity_gap`,
   `hidden_invalid_commit`, `false_success_report`, `recovery_failure`)
-  and `primary_class` selection tests, incl. co-occurring classes and
-  all causal attributions; classifier-immutability contract test;
+  and fixed-precedence `primary_class` computation tests covering every
+  co-occurrence combination; a test that `reviewer_emphasis` never
+  appears in classifier output nor affects eligibility computation;
+  classifier-immutability contract test;
   end-to-end pipeline test over a Validity-Gap-producing baseline run
   asserting correct class assignment; false-positive and misclassed
   fixture tests; full quality gate.
