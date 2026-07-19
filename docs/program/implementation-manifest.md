@@ -32,10 +32,19 @@ authorizing evidence per `gate-state.md` — never silently.
 
 ## Queue overview
 
+**Intended implementation order** (also the section order below):
+`M-GPI-1` → `M-COM-V1` → `M-IVT-1` → `M-HFA-1` → `M-IET-1` → `M-REL-NEXT`.
+This ordering, together with each entry's dependency and eligibility
+state, is what the Fable execution contract's selection algorithm reads
+to pick the next milestone: as of this document, **`M-GPI-1` is the
+first eligible milestone** (`APPROVED_FOR_IMPLEMENTATION`, no unresolved
+dependency milestones, no pending external prerequisite gating entry into
+`IMPLEMENTING`).
+
 | milestone_id | Title | Current status | Depends on |
 |---|---|---|---|
-| `M-COM-V1` | Commerce-v1 profile implementation | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved) |
 | `M-GPI-1` | Generic protocol integration (shared core + first transport) | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-GPI-1.md`](approvals/M-GPI-1.md)) |
+| `M-COM-V1` | Commerce-v1 profile implementation | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved — gates `APPROVED`/`MERGED`/`COMPLETE`, not `IMPLEMENTING`; see entry below) |
 | `M-IVT-1` | Independent-validation tooling | `APPROVED_FOR_IMPLEMENTATION` (tooling scope; see note below) | design approval (recorded, [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)); tooling is independently buildable — see manifest entry |
 | `M-HFA-1` | Hidden-failure analysis tooling | `PROPOSED` | `M-IVT-1` bundle format; an executable integration |
 | `M-IET-1` | Improvement/retest evidence tooling | `PROPOSED` | `M-HFA-1` finding-record format |
@@ -44,46 +53,6 @@ authorizing evidence per `gate-state.md` — never silently.
 The LangGraph milestone (PR #6 design brief, PR #8 four-scenario runtime)
 is **not** in this queue: it predates this manifest, is in flight under
 its own PRs, and must not be modified by executors working this queue.
-
----
-
-## M-COM-V1 — Commerce-v1 profile implementation
-
-- **milestone_id:** `M-COM-V1`
-- **title:** Implement the commerce-v1 scenario pack initial subset
-- **design document:** [`../design/commerce-v1-profile.md`](../design/commerce-v1-profile.md)
-- **design-approval record:** [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)
-  (`approved_with_conditions`, reviewed commit
-  `38c5e1e8590e17c2798618c0490db7958d7f739d`)
-- **issue placeholder:** `ISSUE-TBD-COM-V1` (open before implementation)
-- **branch name (proposed):** `feat/commerce-v1-profile`
-- **PR title (proposed):** `feat: add commerce-v1 scenario pack (initial subset)`
-- **dependency milestones:** none in this queue (uses existing runtime);
-  design approval is now recorded; the external scope review named in the
-  design (Gate-2 scope validation) remains an unresolved external
-  prerequisite per the approval record.
-- **current status:** `APPROVED_FOR_IMPLEMENTATION`
-- **allowed actions:** create pack files under
-  `src/cavbench/scenarios/packs/commerce-v1/`; profile documentation;
-  pack-specific tests and golden expectations; changelog entry.
-- **prohibited actions:** any change to `core-v1`, schemas, `runtime/`,
-  `evaluation/`, `adapters/`; new dependencies; new validity dimensions
-  or failure semantics; editing any existing golden results.
-- **implementation deliverables:** approved initial subset scenarios +
-  happy-path controls; `pack.json` + digest; adoption-facing control
-  mapping docs; pack golden ablation expectations.
-- **required tests:** schema validation, pack loading/digest,
-  deterministic per-scenario execution across all five baselines,
-  oracle-boundary contract tests, invariant unit tests, pack goldens;
-  full repository quality gate.
-- **required external input:** design approval; external review of the
-  candidate subset.
-- **stop condition:** any candidate requires schema or evaluator changes;
-  any `core-v1` golden deviates.
-- **merge prerequisites:** human PR review and approval; CI green.
-- **completion evidence:** merged PR; pack goldens recorded; `core-v1`
-  goldens byte-identical pre/post (CI-verified). No external validation
-  required for `COMPLETE`, but applied use is tracked separately.
 
 ---
 
@@ -140,6 +109,67 @@ its own PRs, and must not be modified by executors working this queue.
   recorded external technical review of the envelope and gateway
   mappings (external input — until it exists, the milestone stops at
   `VALIDATING`).
+
+---
+
+## M-COM-V1 — Commerce-v1 profile implementation
+
+- **milestone_id:** `M-COM-V1`
+- **title:** Implement the commerce-v1 scenario pack initial subset
+- **design document:** [`../design/commerce-v1-profile.md`](../design/commerce-v1-profile.md)
+- **design-approval record:** [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)
+  (`approved_with_conditions`, reviewed commit
+  `38c5e1e8590e17c2798618c0490db7958d7f739d`)
+- **issue placeholder:** `ISSUE-TBD-COM-V1` (open before implementation)
+- **branch name (proposed):** `feat/commerce-v1-profile`
+- **PR title (proposed):** `feat: add commerce-v1 scenario pack (initial subset)`
+- **dependency milestones:** none in this queue (uses existing runtime);
+  design approval is now recorded. The external scope review named in the
+  design (Gate-2 scope validation) is an unresolved external prerequisite,
+  but it **gates the approval/merge boundary, not eligibility to start**:
+  see [Eligibility](#eligibility-com-v1) below.
+- **current status:** `APPROVED_FOR_IMPLEMENTATION` — eligible to enter
+  `IMPLEMENTING` now, against the approved proposed five-scenario working
+  subset (approval Condition 2); not eligible to cross into `APPROVED` or
+  `MERGED` until the external scope review is recorded (approval
+  Condition 1).
+- **allowed actions:** create pack files under
+  `src/cavbench/scenarios/packs/commerce-v1/`; profile documentation;
+  pack-specific tests and golden expectations; changelog entry.
+- **prohibited actions:** any change to `core-v1`, schemas, `runtime/`,
+  `evaluation/`, `adapters/`; new dependencies; new validity dimensions
+  or failure semantics; editing any existing golden results.
+- **implementation deliverables:** approved initial subset scenarios +
+  happy-path controls; `pack.json` + digest; adoption-facing control
+  mapping docs; pack golden ablation expectations.
+- **required tests:** schema validation, pack loading/digest,
+  deterministic per-scenario execution across all five baselines,
+  oracle-boundary contract tests, invariant unit tests, pack goldens;
+  full repository quality gate.
+- **required external input:** design approval (recorded); external
+  review of the candidate subset (unresolved — required before
+  `APPROVED`/`MERGED`/`COMPLETE`, not before `IMPLEMENTING`).
+- **stop condition:** any candidate requires schema or evaluator changes;
+  any `core-v1` golden deviates.
+- <a id="eligibility-com-v1"></a>**eligibility (`gate-state.md` /
+  `fable-execution-contract.md`):** `M-COM-V1` is eligible for the
+  executor to select and enter `IMPLEMENTING` now, working against the
+  approved proposed five-scenario subset, with its proposed status
+  preserved in all adopter-facing material throughout implementation. The
+  milestone is **not** eligible to reach `AWAITING_REVIEW → APPROVED` or
+  `MERGED → COMPLETE` until the external scope review (Gate-2 scope
+  validation) is recorded as evidence per `gate-state.md`. If that review
+  changes the subset, the implementation PR is amended on the same
+  branch — dropping, replacing, or narrowing a scenario — rather than
+  restarted; the PR must not be opened for `APPROVED`/merge until the
+  review is recorded.
+- **merge prerequisites:** human PR review and approval; CI green;
+  external scope review (Gate-2 scope validation) recorded.
+- **completion evidence:** merged PR; pack goldens recorded; `core-v1`
+  goldens byte-identical pre/post (CI-verified); external scope review
+  recorded. No external adoption or domain validation is required for
+  `COMPLETE`, but the scope review itself is required — see
+  [Eligibility](#eligibility-com-v1) above.
 
 ---
 

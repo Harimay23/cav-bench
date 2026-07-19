@@ -34,10 +34,14 @@ index lists every approval record currently on file.
 
 ## Approved records
 
+Listed in intended implementation order (see
+[`../implementation-manifest.md`](../implementation-manifest.md)):
+`M-GPI-1` is currently the first eligible milestone.
+
 | Milestone | Design | Decision | Reviewed commit | Conditions summary | Current execution status |
 |---|---|---|---|---|---|
-| [`M-GPI-1`](M-GPI-1.md) | [Generic MCP or REST integration](../../design/generic-protocol-integration.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | DECISION_LOG entry required at implementation; no MCP transport in this milestone; no new evaluator/commit-path/schema surface; stop if evaluator/core/schema changes needed. | `APPROVED_FOR_IMPLEMENTATION` — not started. |
-| [`M-COM-V1`](M-COM-V1.md) | [Commerce-v1 consequential-action profile](../../design/commerce-v1-profile.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Final scenario subset still subject to external scope review; proposed 5-scenario subset usable as working scope under stated conditions; no `core-v1`/schema/evaluator/runtime changes; commerce remains an applied profile, not CAV-Bench's identity. | `APPROVED_FOR_IMPLEMENTATION` — not started. |
+| [`M-GPI-1`](M-GPI-1.md) | [Generic MCP or REST integration](../../design/generic-protocol-integration.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | DECISION_LOG entry required at implementation; no MCP transport in this milestone; no new evaluator/commit-path/schema surface; stop if evaluator/core/schema changes needed. | `APPROVED_FOR_IMPLEMENTATION` — not started; first eligible milestone. |
+| [`M-COM-V1`](M-COM-V1.md) | [Commerce-v1 consequential-action profile](../../design/commerce-v1-profile.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Final scenario subset still subject to external scope review — this **gates the approval/merge/complete transitions, not the start of implementation**: the milestone is eligible to enter `IMPLEMENTING` now against the approved proposed 5-scenario working subset, but cannot reach `APPROVED`/`MERGED`/`COMPLETE` until the external scope review is recorded, and the implementation PR may need amendment (dropping, replacing, or narrowing a scenario) once that review lands; no `core-v1`/schema/evaluator/runtime changes; commerce remains an applied profile, not CAV-Bench's identity. | `APPROVED_FOR_IMPLEMENTATION` — not started; eligible to start, blocked from merge/completion pending external scope review. |
 | [`M-IVT-1`](M-IVT-1.md) | [Independent external validation run](../../design/independent-validation-run.md) (tooling scope) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Tooling and maintainer dry run only; dry run always classified `project_self_run`; no claim of external run, adoption, or endorsement; non-recursive integrity model preserved exactly. | `APPROVED_FOR_IMPLEMENTATION` — not started. |
 
 ## Not approved

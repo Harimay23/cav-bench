@@ -68,13 +68,48 @@ authorization, and not external validation — see
    scope of CAV-Bench, in all adoption-facing material produced by the
    implementation.
 
+## Eligibility: what the external scope review gates, and what it does not
+
+This condition is stated precisely so the eligibility of `M-COM-V1` under
+`gate-state.md`/`fable-execution-contract.md` is decidable without
+ambiguity:
+
+- The pending external scope review **does not block starting
+  implementation.** `M-COM-V1` is eligible to enter `IMPLEMENTING` now,
+  against the approved proposed five-scenario working subset, under
+  Condition 2 above.
+- The pending review **does block treating the subset as final or as
+  externally validated.** Nothing produced under this approval — code,
+  docs, PR body, adoption-facing material — may describe the five-
+  scenario subset as confirmed, final, or reviewed; it must be described
+  as proposed and pending review throughout implementation.
+- The pending review **must be recorded before the milestone can be
+  approved (as a PR), merged, or marked `COMPLETE`.** Per `gate-state.md`,
+  `AWAITING_REVIEW → APPROVED` and `MERGED → COMPLETE` both require their
+  own recorded evidence; for `M-COM-V1` that evidence set includes the
+  external scope review record (Gate-2 scope validation) in addition to
+  ordinary PR review. A PR opened against the working subset without that
+  review recorded may reach `PR_OPEN` / `AWAITING_REVIEW` but may not
+  cross into `APPROVED` or `MERGED`.
+- The review's outcome **may require amendment of the implementation PR
+  before merge** — e.g. dropping, replacing, or narrowing a scenario from
+  the five-scenario working subset. The implementation PR must be written
+  so that such an amendment is a normal follow-up commit on the same
+  branch, not a restart.
+
+In short: **eligible to start now under the working subset; not eligible
+to cross the approval/merge gate until the external scope review is
+recorded.**
+
 ## Unresolved external prerequisites
 
 Implementation may not treat these as satisfied by this approval:
 
 - External review of the candidate set and initial subset remains
   required for Gate-2 scope validation (per the design's acceptance
-  criteria).
+  criteria) — required before `APPROVED`/`MERGED`/`COMPLETE`, not before
+  `IMPLEMENTING` (see [Eligibility](#eligibility-what-the-external-scope-review-gates-and-what-it-does-not)
+  above).
 - Implementation completion does not constitute external adoption or
   domain validation of the profile.
 
@@ -83,9 +118,12 @@ Implementation may not treat these as satisfied by this approval:
 - [Pull request #9](https://github.com/Harimay23/cav-bench/pull/9)
   (merged), which carried the reviewed design text at commit
   `38c5e1e8590e17c2798618c0490db7958d7f739d`.
-- Human approver decision recorded directly in this repository via
-  [`docs/approve-initial-workstreams`](../../../CHANGELOG.md), the PR that
-  introduces this record.
+- [Pull request #10](https://github.com/Harimay23/cav-bench/pull/10)
+  (`docs/approve-initial-workstreams`) introduces and records this human
+  approval decision. Additional provenance: PR #10 branch head at commit
+  `617f6f0be6600a0bf7d2ceccef141e45959040e9` as of the decision above;
+  the PR head advances with subsequent corrections to this documentation
+  package, which does not itself reopen the approval.
 
 ## Scope of this record
 

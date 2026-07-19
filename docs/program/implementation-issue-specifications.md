@@ -85,7 +85,10 @@ already permit; the issue is a tracking artifact, not a new authorization.
 - **milestone_id:** `M-COM-V1`
 - **Design link:** [`docs/design/commerce-v1-profile.md`](../design/commerce-v1-profile.md)
 - **Approval record link:** [`docs/program/approvals/M-COM-V1.md`](approvals/M-COM-V1.md) — `approved_with_conditions`
-- **Status:** Approved for implementation
+- **Status:** Approved for implementation — **eligible to start now**
+  against the approved proposed five-scenario working subset; **not
+  eligible to merge or be marked complete** until the external scope
+  review below is recorded (see Dependencies and Acceptance criteria).
 - **Scope:** A self-contained `commerce-v1` scenario pack implementing an
   initial subset (4–6 scenarios, proposed: C-01, C-03, C-06, C-08, C-17)
   plus happy-path controls, loadable via the existing pack loader with no
@@ -95,7 +98,9 @@ already permit; the issue is a tracking artifact, not a new authorization.
   documentation; pack golden ablation expectations.
 - **Acceptance criteria:**
   1. External review of the candidate set completed and the subset
-     confirmed or amended (Gate-2 scope validation).
+     confirmed or amended (Gate-2 scope validation). **This gates
+     merge/completion, not the start of implementation** — see
+     Dependencies.
   2. Implemented subset passes the full quality gate and its own golden
      expectations; `core-v1` goldens byte-identical before/after.
   3. Guarded vs. flawed behavior separation visible in the pack's
@@ -112,11 +117,17 @@ already permit; the issue is a tracking artifact, not a new authorization.
   scenario's declared dimensions/`CMF-*` codes appear in the control-
   mapping documentation; full repository quality gate.
 - **Dependencies:** none in this queue (uses existing runtime); requires
-  the recorded design approval (satisfied) **and** the external scope
-  review named in the design (Gate-2 scope validation, unresolved).
+  the recorded design approval (satisfied). The external scope review
+  named in the design (Gate-2 scope validation, unresolved) does **not**
+  block opening this issue or starting implementation against the
+  approved proposed five-scenario working subset — it blocks the PR from
+  reaching `APPROVED`/`MERGED`/`COMPLETE`. If the review changes the
+  subset, amend the implementation PR on the same branch rather than
+  restarting.
 - **External prerequisites:** external review of the candidate set and
-  initial subset for Gate-2 scope validation; implementation completion
-  does not constitute external adoption or domain validation.
+  initial subset for Gate-2 scope validation — required before merge,
+  not before starting work; implementation completion does not
+  constitute external adoption or domain validation.
 - **Branch name:** `feat/commerce-v1-profile`
 - **PR title:** `feat: add commerce-v1 scenario pack initial subset`
 - **Stop conditions:** any candidate requires schema or evaluator

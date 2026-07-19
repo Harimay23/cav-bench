@@ -82,9 +82,12 @@ Implementation may not treat these as satisfied by this approval:
 - [Pull request #9](https://github.com/Harimay23/cav-bench/pull/9)
   (merged), which carried the reviewed design text at commit
   `38c5e1e8590e17c2798618c0490db7958d7f739d`.
-- Human approver decision recorded directly in this repository via
-  [`docs/approve-initial-workstreams`](../../../CHANGELOG.md), the PR that
-  introduces this record.
+- [Pull request #10](https://github.com/Harimay23/cav-bench/pull/10)
+  (`docs/approve-initial-workstreams`) introduces and records this human
+  approval decision. Additional provenance: PR #10 branch head at commit
+  `617f6f0be6600a0bf7d2ceccef141e45959040e9` as of the decision above;
+  the PR head advances with subsequent corrections to this documentation
+  package, which does not itself reopen the approval.
 
 ## Scope of this record
 
