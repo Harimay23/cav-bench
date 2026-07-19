@@ -12,8 +12,17 @@ entry's status and merge prerequisites permit. Statuses use
 [`gate-state.md`](gate-state.md).
 
 Initial statuses below reflect real dependencies as of this document.
-**No milestone is approved for implementation.** Branch names and PR
-titles are proposed per
+**Three milestones — `M-GPI-1`, `M-COM-V1`, and `M-IVT-1` — are now
+`APPROVED_FOR_IMPLEMENTATION`**, per the recorded human design-approval
+records in [`approvals/`](approvals/) (see each entry below for its
+record link). No implementation has begun under any of these approvals.
+`M-HFA-1`, `M-IET-1`, and `M-REL-NEXT` remain unapproved. The manifest may
+carry multiple `APPROVED_FOR_IMPLEMENTATION` entries at once; the work
+selection algorithm in
+[`fable-execution-contract.md`](fable-execution-contract.md) still
+chooses exactly one earliest-eligible milestone at a time — multiple
+approved entries do not authorize parallel or out-of-order execution.
+Branch names and PR titles are proposed per
 [`pr-and-branch-strategy.md`](pr-and-branch-strategy.md) and become fixed
 at design approval. Issue references are placeholders until issues are
 opened.
@@ -23,11 +32,11 @@ authorizing evidence per `gate-state.md` — never silently.
 
 ## Queue overview
 
-| milestone_id | Title | Initial status | Depends on |
+| milestone_id | Title | Current status | Depends on |
 |---|---|---|---|
-| `M-COM-V1` | Commerce-v1 profile implementation | `AWAITING_DESIGN_REVIEW` | design approval; external scope review |
-| `M-GPI-1` | Generic protocol integration (shared core + first transport) | `AWAITING_DESIGN_REVIEW` | design approval |
-| `M-IVT-1` | Independent-validation tooling | `PROPOSED` | a merged, usable executable integration |
+| `M-COM-V1` | Commerce-v1 profile implementation | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved) |
+| `M-GPI-1` | Generic protocol integration (shared core + first transport) | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-GPI-1.md`](approvals/M-GPI-1.md)) |
+| `M-IVT-1` | Independent-validation tooling | `APPROVED_FOR_IMPLEMENTATION` (tooling scope; see note below) | design approval (recorded, [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)); tooling is independently buildable — see manifest entry |
 | `M-HFA-1` | Hidden-failure analysis tooling | `PROPOSED` | `M-IVT-1` bundle format; an executable integration |
 | `M-IET-1` | Improvement/retest evidence tooling | `PROPOSED` | `M-HFA-1` finding-record format |
 | `M-REL-NEXT` | Versioned follow-up release | `PROPOSED` (effectively blocked) | approved, merged scope + external evidence |
@@ -43,13 +52,17 @@ its own PRs, and must not be modified by executors working this queue.
 - **milestone_id:** `M-COM-V1`
 - **title:** Implement the commerce-v1 scenario pack initial subset
 - **design document:** [`../design/commerce-v1-profile.md`](../design/commerce-v1-profile.md)
+- **design-approval record:** [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)
+  (`approved_with_conditions`, reviewed commit
+  `38c5e1e8590e17c2798618c0490db7958d7f739d`)
 - **issue placeholder:** `ISSUE-TBD-COM-V1` (open before implementation)
 - **branch name (proposed):** `feat/commerce-v1-profile`
 - **PR title (proposed):** `feat: add commerce-v1 scenario pack (initial subset)`
 - **dependency milestones:** none in this queue (uses existing runtime);
-  requires design approval **and** the external scope review named in the
-  design (Gate-2 scope validation).
-- **initial status:** `AWAITING_DESIGN_REVIEW`
+  design approval is now recorded; the external scope review named in the
+  design (Gate-2 scope validation) remains an unresolved external
+  prerequisite per the approval record.
+- **current status:** `APPROVED_FOR_IMPLEMENTATION`
 - **allowed actions:** create pack files under
   `src/cavbench/scenarios/packs/commerce-v1/`; profile documentation;
   pack-specific tests and golden expectations; changelog entry.
@@ -79,15 +92,20 @@ its own PRs, and must not be modified by executors working this queue.
 - **milestone_id:** `M-GPI-1`
 - **title:** Implement the benchmark-owned protocol gateway (shared core + first transport frontend) and reference candidate client
 - **design document:** [`../design/generic-protocol-integration.md`](../design/generic-protocol-integration.md)
+- **design-approval record:** [`approvals/M-GPI-1.md`](approvals/M-GPI-1.md)
+  (`approved_with_conditions`, reviewed commit
+  `38c5e1e8590e17c2798618c0490db7958d7f739d` — the proposed
+  gateway-mediated topology and REST-first transport order are confirmed
+  by the record)
 - **issue placeholder:** `ISSUE-TBD-GPI-1`
 - **branch name (proposed):** `feat/generic-protocol-integration`
 - **PR title (proposed):** `feat: add generic protocol integration core with first transport`
-- **dependency milestones:** none in this queue; requires design
-  approval, including confirmation of the proposed gateway-mediated
-  topology and REST-first transport order, and a `DECISION_LOG.md` entry
-  at implementation time recording both (per `AGENTS.md` scope
-  discipline).
-- **initial status:** `AWAITING_DESIGN_REVIEW`
+- **dependency milestones:** none in this queue; design approval is now
+  recorded, including confirmation of the proposed gateway-mediated
+  topology and REST-first transport order; a `DECISION_LOG.md` entry at
+  implementation time recording both remains required (per `AGENTS.md`
+  scope discipline and approval Condition 1).
+- **current status:** `APPROVED_FOR_IMPLEMENTATION`
 - **allowed actions:** new optional-extra modules for the gateway core
   and first transport frontend; deterministic reference candidate client
   (examples-adjacent); CI example job; documentation; changelog +
@@ -130,15 +148,25 @@ its own PRs, and must not be modified by executors working this queue.
 - **milestone_id:** `M-IVT-1`
 - **title:** Build the validation-run bundle tooling and runner documentation
 - **design document:** [`../design/independent-validation-run.md`](../design/independent-validation-run.md)
+- **design-approval record:** [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)
+  (`approved_with_conditions`, reviewed commit
+  `38c5e1e8590e17c2798618c0490db7958d7f739d` — **tooling scope only**)
 - **issue placeholder:** `ISSUE-TBD-IVT-1`
 - **branch name (proposed):** `feat/independent-validation-tooling`
 - **PR title (proposed):** `feat: add independent-validation run tooling and runner kit`
-- **dependency milestones:** a merged, usable executable integration for
-  the run classes the kit advertises — baseline-profile runs need only
-  released v1.0.0, but the roadmap's independent-run outcome anticipates
-  framework/protocol runs, so this milestone should follow the LangGraph
-  runtime merge (outside this queue) or `M-GPI-1`.
-- **initial status:** `PROPOSED`
+- **dependency milestones:** the *tooling* (manifest/attestation
+  templates, checksum/bundle-root generator and verifier, runner
+  quick-start, reproducibility-review checklist, maintainer dry run) is
+  independently buildable now — a baseline-profile validation run needs
+  only the released v1.0.0 package, so tooling implementation does not
+  require the LangGraph runtime or `M-GPI-1` to merge first. Any
+  documentation the tooling ships that advertises a framework-specific or
+  protocol-specific runner path (e.g. a LangGraph or generic-protocol-
+  integration run) still requires the corresponding executable
+  integration to be merged before that path is presented as usable. The
+  milestone's `independent_external` outcome remains blocked by external
+  evidence regardless of tooling completion.
+- **current status:** `APPROVED_FOR_IMPLEMENTATION` (tooling scope)
 - **allowed actions:** manifest/attestation templates and (if approved in
   design review) machine schemas; bundle packager; checksum-manifest and
   detached-bundle-root generator/verifier implementing the non-recursive
