@@ -1,6 +1,16 @@
 # Design: Commerce-v1 Consequential-Action Profile
 
-Status: Proposed
+Status: Approved for implementation with conditions
+
+> **Design approval:** [`docs/program/approvals/M-COM-V1.md`](../program/approvals/M-COM-V1.md)
+> records human approval, at reviewed commit
+> `38c5e1e8590e17c2798618c0490db7958d7f739d`, with conditions and
+> unresolved external prerequisites (including that the final scenario
+> subset still requires external scope review). Approval is
+> design-specific, not implementation, PR approval, merge authorization,
+> or external validation — see the approval record for the exact approved
+> and unapproved scope. No implementation has occurred under this
+> approval.
 
 This document designs `commerce-v1`, the first **applied domain profile**
 for CAV-Bench: a scenario pack modeling consequential commerce actions

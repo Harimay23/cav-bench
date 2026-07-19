@@ -10,6 +10,24 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Documentation
 
+- Recorded human design approvals for three future-workstream milestones:
+  `M-GPI-1` (generic protocol integration), `M-COM-V1` (commerce-v1
+  profile), and `M-IVT-1` (independent-validation tooling, tooling scope
+  only) — each `approved_with_conditions` by the repository owner, at
+  reviewed commit `38c5e1e8590e17c2798618c0490db7958d7f739d` (PR #9's
+  design head), with approval records at `docs/program/approvals/`
+  (`M-GPI-1.md`, `M-COM-V1.md`, `M-IVT-1.md`, and an index `README.md`).
+  Updated the three corresponding design documents' status to `Approved
+  for implementation with conditions` and the implementation manifest's
+  entries to `APPROVED_FOR_IMPLEMENTATION`. `M-HFA-1`, `M-IET-1`, and
+  `M-REL-NEXT` remain unapproved and `Status: Proposed`; no implementation
+  has begun for any milestone. Added
+  `docs/program/implementation-issue-specifications.md`, ready-to-create
+  GitHub issue specifications for all six milestones (three approved,
+  three proposed/not executable), to be used after this PR merges. This
+  is a documentation and governance change only: no evaluator, runtime,
+  scenario, schema, dependency, or CI behavior changed, and nothing is
+  merged or implemented by it.
 - Added the future-workstream design package (`docs/design/`): proposed
   designs for an independent external validation run, hidden-failure
   discovery, a before-and-after improvement case, the commerce-v1

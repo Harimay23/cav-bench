@@ -4,13 +4,20 @@ Status: Proposed
 
 This index makes the future-workstream design package discoverable: six
 workstream designs, six program execution-control documents, and four
-shared diagrams. Every document in the package is **Proposed** — none is
-approved for implementation. Approval is **per design, not per PR**: each
-design requires its own design-approval record in the format defined in
+shared diagrams. Approval is **per design, not per PR**: each design
+requires its own design-approval record in the format defined in
 `../program/gate-state.md` (design path, reviewed commit SHA, decision,
 approver, timestamp, conditions, unresolved external prerequisites).
 Generic approval or merging of the documentation pull request that
-carries this package approves none of the six designs.
+carried this package (PR #9) approved none of the six designs by itself.
+Three designs — `generic-protocol-integration.md`, `commerce-v1-profile.md`,
+and `independent-validation-run.md` (tooling scope) — have since received
+such a record and are `Status: Approved for implementation with
+conditions`; the remaining three (`hidden-failure-discovery.md`,
+`improvement-case-study.md`, `follow-up-release.md`) remain `Status:
+Proposed`, with no approval record and no implementation authorized. See
+[Design approvals](#design-approvals) below for the current record set.
+No implementation has occurred under any approval recorded so far.
 
 The package designs future work for the current 90-day program
 (`../strategy/90-day-engineering-program.md`) beyond the in-flight
@@ -42,6 +49,19 @@ review.
 | [Fable execution contract](../program/fable-execution-contract.md) | The execution model a future master prompt will invoke to implement approved milestones one at a time |
 | [PR and branch strategy](../program/pr-and-branch-strategy.md) | One branch and one focused PR per milestone; stacking, retargeting, and cleanup rules |
 | [Resume and recovery protocol](../program/resume-and-recovery-protocol.md) | Execution-journal format and restart behavior after interruption |
+
+## Design approvals
+
+Human design-approval records live at
+[`../program/approvals/`](../program/approvals/README.md), one per
+approved design (format defined in `../program/gate-state.md`). As of
+this update, `M-GPI-1`, `M-COM-V1`, and `M-IVT-1` (tooling scope) carry
+recorded `approved_with_conditions` records; `M-HFA-1`, `M-IET-1`, and
+`M-REL-NEXT` remain unapproved and `Status: Proposed`. See the approvals
+index for the full table, conditions, and unresolved external
+prerequisites — an approval record is design-specific, not
+implementation, PR approval, merge authorization, or external
+validation.
 
 ## Diagrams
 
