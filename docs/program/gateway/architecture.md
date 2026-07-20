@@ -48,12 +48,13 @@ five baseline profiles). The gateway holds no commit path of its own:
   today: untrusted comparison input, never commit truth. See
   `tests/contract/test_gateway_forged_report.py`.
 
-## The one-request-to-one-attempt invariant
+## The request-to-attempt invariant
 
-A well-formed, authenticated candidate request maps to **exactly one**
-`ToolFacade` invocation (or, for the `report` action, zero — submitting a
-report never touches `ToolFacade`; it only sets the input to a later
-`finalize()` call). The gateway:
+**Every accepted tool-operation request maps to exactly one `ToolFacade`
+invocation. Final-report submission is an accepted non-tool request and
+maps to zero `ToolFacade` invocations by design** — submitting a report
+never touches `ToolFacade`; it only sets the input to a later
+`finalize()` call. The gateway:
 
 - performs no batching, caching, speculative execution, or replay;
 - never retries a `ToolFacade` call on the candidate's behalf;
@@ -64,20 +65,51 @@ report never touches `ToolFacade`; it only sets the input to a later
   or `correlation_id` — every identity field the candidate supplies passes
   through to `ToolFacade` unmodified.
 
-A malformed or unauthenticated request is rejected inside
-`GatewaySession.handle()` **before** any `ToolFacade` call, so it creates
-zero benchmark attempts; it is recorded only in the gateway session log,
-never in the benchmark trace. See
-`tests/contract/test_gateway_neutrality.py` for the tests enforcing this
-(1:1 mapping, malformed/auth-failure zero-attempt guarantees, no
-unrequested reconciliation, no gateway-side retry).
+A request that is not accepted creates zero `ToolFacade` invocations,
+rejected inside `GatewaySession.handle()` **before** any `ToolFacade`
+call and recorded only in the gateway session log, never in the benchmark
+trace. Rejection reasons: a malformed envelope, an authentication
+failure, an unknown action, or (see
+[Capability enforcement](#capability-enforcement) below) a **capability
+violation** — a `tool_name`, `namespace`, or action the current scenario
+never advertised via `capabilities()`. See
+`tests/contract/test_gateway_neutrality.py` and
+`tests/contract/test_gateway_capability_enforcement.py` for the tests
+enforcing this (request-to-attempt correspondence, malformed/auth/
+capability-violation zero-attempt guarantees, no unrequested
+reconciliation, no gateway-side retry).
+
+## Capability enforcement
+
+Before any `ToolFacade` call, `GatewaySession._check_capability()`
+verifies the requested operation is actually advertised by
+`capabilities()` for the current scenario, derived from the same
+adapter-visible `ScenarioView.plan` capability discovery reads:
+
+- a `write` request's `tool_name` must be one of the scenario's
+  advertised `write` operations, under the advertised `namespace`;
+- a `compensate` request's `tool_name` must be one of the scenario's
+  advertised `compensate` operations, under the advertised `namespace` —
+  **write and compensate tools are never interchangeable**: a tool
+  advertised only as `compensate` is rejected if sent as `write`, and
+  vice versa;
+- a `read` request's `namespace` must be scenario-visible (referenced by
+  some step of the plan);
+- an unadvertised or mismatched combination is a gateway-level
+  `capability_violation` rejection — zero `ToolFacade` calls, exactly
+  like a malformed envelope.
+
+This is scenario-visible-capability enforcement, not an oracle check: it
+never consults `ScenarioOracle` and never judges whether an operation
+*should* succeed, only whether it is a shape the scenario advertises at
+all.
 
 ## Components
 
 | Component | Module | Responsibility |
 |---|---|---|
 | Envelope | `cavbench.gateway.envelope` | The common request/response envelope; schema validation. |
-| Gateway core | `cavbench.gateway.core` | Session binding, the 1:1 mapping, response normalization, capability advertisement, finalize intake. |
+| Gateway core | `cavbench.gateway.core` | Session binding, capability enforcement, the request-to-attempt mapping, response normalization, capability advertisement, finalize intake. |
 | Redaction | `cavbench.gateway.redaction` | Strips run tokens/secrets from anything recorded. |
 | Session log | `cavbench.gateway.session_log` | Redacted, append-only record of every wire exchange (including gateway-level rejections). |
 | REST frontend | `cavbench.gateway.rest` | Standard-library `http.server` HTTP mapping of the envelope, loopback-only. |
@@ -126,7 +158,7 @@ and the four-way ambiguity vocabulary does not apply to them.
 
 - **No MCP transport.** The extension boundary (`cavbench.gateway.core`
   is transport-neutral) is preserved, but no MCP frontend code exists in
-  this milestone — see `DECISION_LOG.md` D-020.
+  this milestone — see `DECISION_LOG.md` D-021.
 - **No evaluator, runtime, or `core-v1` changes.** Nothing in
   `src/cavbench/evaluation/` or `src/cavbench/runtime/` changed; the
   scenario schema is unchanged; every canonical golden result is

@@ -45,7 +45,7 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   pattern). No evaluator, runtime, scenario-schema, or `core-v1` change;
   all canonical ablation goldens are byte-identical before and after.
   MCP transport is explicitly out of scope for this milestone (deferred,
-  see `DECISION_LOG.md` D-020). External technical review of the
+  see `DECISION_LOG.md` D-021). External technical review of the
   envelope and REST mapping has not occurred; the gateway is not claimed
   as externally validated, adopted, or production-ready. Tracked by
   [issue #11](https://github.com/Harimay23/cav-bench/issues/11).

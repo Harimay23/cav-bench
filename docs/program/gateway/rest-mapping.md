@@ -2,7 +2,7 @@
 
 Module: [`cavbench.gateway.rest`](../../../src/cavbench/gateway/rest.py).
 Standard-library `http.server` only — no new runtime dependency
-(`DECISION_LOG.md` D-009, D-020). Binds to `127.0.0.1` by default
+(`DECISION_LOG.md` D-009, D-021). Binds to `127.0.0.1` by default
 (loopback-only benchmark mode).
 
 ## Routes
