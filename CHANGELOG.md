@@ -10,6 +10,14 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Documentation
 
+- Added a draft LangGraph adapter mapping, a non-executable
+  `ExecutionAdapter`-shaped skeleton, and contract tests covering
+  optional-dependency isolation and honest failure behavior. The mapping
+  documents the benchmark-owned commit-truth boundary, ambiguous-response
+  reconciliation requirements, and the current limitation around atomic
+  commit-time authorization enforcement. The integration remains
+  unimplemented and is not official LangChain or LangGraph support,
+  endorsement, adoption, maintainer approval, or production validation.
 - Recorded human design approvals for three future-workstream milestones:
   `M-GPI-1` (generic protocol integration), `M-COM-V1` (commerce-v1
   profile), and `M-IVT-1` (independent-validation tooling, tooling scope
