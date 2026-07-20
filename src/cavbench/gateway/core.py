@@ -33,6 +33,7 @@ therefore also maps to zero ``ToolFacade`` invocations.
 
 from __future__ import annotations
 
+import copy
 import hmac
 import secrets
 from collections.abc import Mapping
@@ -159,11 +160,12 @@ class GatewaySession:
             self._operations_cache = derive_operations(self.scenario.view)
         return self._operations_cache
 
-    def capabilities(self) -> dict[str, JSONValue]:
-        """Compute (once) the operations available in this scenario,
-        derived only from the adapter-visible `ScenarioView` -- never the
-        oracle. Pure: does not touch the session log. Use
-        `discover_capabilities()` to advertise *and* log (GPI-FR-009)."""
+    def _canonical_advertisement(self) -> dict[str, JSONValue]:
+        """Build (once) and cache the canonical capability advertisement.
+        This exact object is never handed to a caller -- `capabilities()`
+        and `discover_capabilities()` each return their own independent
+        deep copy of it, so no caller can mutate what any other caller
+        (or the session log, or a later discovery call) sees."""
         if self._advertisement_cache is not None:
             return self._advertisement_cache
 
@@ -184,7 +186,7 @@ class GatewaySession:
             )
             operations.append(payload)
 
-        advertisement = {
+        advertisement: dict[str, JSONValue] = {
             "envelope_version": ENVELOPE_VERSION,
             "session_id": self.session_id,
             "scenario_id": view.id,
@@ -195,20 +197,36 @@ class GatewaySession:
         self._advertisement_cache = advertisement
         return advertisement
 
+    def capabilities(self) -> dict[str, JSONValue]:
+        """A fresh, independent deep copy of the operations available in
+        this scenario, derived only from the adapter-visible
+        `ScenarioView` -- never the oracle. Pure: does not touch the
+        session log. Use `discover_capabilities()` to advertise *and* log
+        (GPI-FR-009).
+
+        Every call returns a brand-new structure: mutating the returned
+        dict (or anything nested inside it) can never affect the
+        canonical internal snapshot, any other call's return value, or
+        anything already recorded in the session log."""
+        return copy.deepcopy(self._canonical_advertisement())
+
     def discover_capabilities(self) -> dict[str, JSONValue]:
         """The candidate-facing capability-discovery operation
-        (`GET /capabilities`): returns the same frozen advertisement
-        `capabilities()` always returns for this session, and records the
-        discovery in the session log every time it is called (GPI-FR-009).
+        (`GET /capabilities`): returns a fresh deep copy of the same
+        frozen advertisement `capabilities()` always returns for this
+        session, and records an independent deep copy of that same
+        content in the session log every time it is called (GPI-FR-009).
         Repeated discovery is deterministic by construction: the
         advertisement is computed once and cached (see
         `_resource_scoped_operations`), so every logged entry's
-        `advertisement` field is identical, while each call still gets its
-        own log entry (auditable: a reviewer can see exactly how many
-        times, and when, the candidate asked)."""
-        advertisement = self.capabilities()
-        self.log.record_discovery(advertisement=advertisement)
-        return advertisement
+        `advertisement` field is identical in *content*, while each call
+        still gets its own log entry (auditable: a reviewer can see
+        exactly how many times, and when, the candidate asked) and its
+        own independent object (mutating what one call returned, or what
+        one log entry stored, can never reach any other)."""
+        canonical = self._canonical_advertisement()
+        self.log.record_discovery(advertisement=copy.deepcopy(canonical))
+        return copy.deepcopy(canonical)
 
     # -- capability enforcement (review follow-up: scenario-visible allowlist,
     # enforced before any ToolFacade call, never derived from the oracle,

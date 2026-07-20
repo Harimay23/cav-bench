@@ -10,6 +10,7 @@ wire -> trace -> ledger -> evaluation using only run artifacts.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +21,7 @@ from cavbench.gateway.redaction import redact
 @dataclass(frozen=True)
 class SessionLogEntry:
     seq: int
-    kind: str  # "request" | "rejection"
+    kind: str  # "request" | "rejection" | "discovery"
     action: str | None
     correlation_id: str | None
     operation_id: str | None
@@ -29,6 +30,11 @@ class SessionLogEntry:
     detail: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """A fresh, independent deep copy of this entry. `detail` is
+        rebuilt from a deep copy, not a shallow `dict(self.detail)`, so
+        mutating any nested container in the returned structure (e.g.
+        `entry.to_dict()["detail"]["advertisement"]["operations"][0]`)
+        can never reach back into the stored entry."""
         return {
             "seq": self.seq,
             "kind": self.kind,
@@ -37,7 +43,7 @@ class SessionLogEntry:
             "operation_id": self.operation_id,
             "normalized_status": self.normalized_status,
             "tool_facade_call": self.tool_facade_call,
-            "detail": dict(self.detail),
+            "detail": copy.deepcopy(dict(self.detail)),
         }
 
 
