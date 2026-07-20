@@ -10,6 +10,63 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Added
 
+- Executable LangGraph integration (the next milestone from Issue #5, implementing the merged PR #6 design-stage skeleton):
+  - `LangGraphAdapter` now actually runs a compiled LangGraph graph against an `AdapterSession` (checkpointer, durable `thread_id`, `durability="sync"`), mapping terminal graph state to an untrusted `AdapterResult`. LangGraph stays an optional, lazily-imported dependency; a missing install raises a clear invocation-time error naming `cav-bench[langgraph]`.
+  - Optional `langgraph` extra in `pyproject.toml` (`langgraph>=0.6,<2`; CI continuously tests the declared floor, `langgraph==0.6.0`, and the range's latest resolved release — see `docs/langgraph-adapter-mapping.md#local-vs-ci-validation`).
+  - `framework-v1` builtin scenario pack: the four framework-adapter scenarios from `docs/framework-adapter-brief.md` (FA-01 stale state before commit, FA-02 ambiguous retry, FA-03 partial execution, FA-04 authority change before commit), kept separate from the frozen `core-v1` corpus (see DECISION_LOG D-020).
+  - Deterministic reference LangGraph graphs (`cavbench.adapters.langgraph_reference`) — test fixtures, not a production design — in `guarded` and deliberately-flawed `naive` variants, with stable `operation_id`/`idempotency_key` derivation from durable scenario/thread/step identity.
+  - `tests/langgraph/`: runtime tests for all four scenarios, adversarial trust-boundary tests (graph/adapter success claims cannot alter evaluator output), identifier stability across retry and checkpoint resume, safe idempotent replay, and bit-for-bit determinism; `tests/contract/test_langgraph_adapter_contract.py` covers dependency isolation without langgraph installed.
+  - `examples/langgraph_adapter.py`: runnable outcome-pass vs. commit-valid-fail demonstration (naive run passes a conventional outcome check but fails commit validity on `TS_STALE_WITNESS`; the guarded control adds one revalidation node and becomes commit-valid).
+  - CI (`.github/workflows/ci.yml`): a new `langgraph` job (matrix: `langgraph==0.6.0` and the latest resolved release) actually runs `tests/langgraph/`, the runnable example, and `cavbench validate --pack framework-v1` against the real dependency on every push/PR — previously the executable LangGraph suite silently skipped in CI (`pytest.importorskip`) because only the base `.[dev]` extra was installed. A new `wheel-smoke-test-langgraph` job additionally installs the *built wheel* with its `[langgraph]` extra and re-runs the same validation, so the packaged optional extra is verified, not only the source tree. The existing Python 3.11/3.12/3.13 `test` matrix is unchanged and continues to run without the extra, which is what continuously verifies dependency isolation and the missing-dependency error path.
+- `cavbench list packs` now lists both builtin packs.
+- Synchronized the executable LangGraph work with the final merged PR #6
+  trust-boundary and dependency-isolation contract: corrected residual
+  "tool facade is the authoritative source of commit truth" language in the
+  mapping doc and the adapter's module docstring to the precise split (tool
+  facade as the sole adapter-visible execution path;
+  `BenchmarkEnvironment`/trace/ledger as authoritative truth); made
+  `tests/contract/test_langgraph_adapter_contract.py`'s missing-dependency
+  test deterministic (monkeypatched, no longer environment-dependent) and
+  added a nested-import-failure test; fixed `AdapterResult.metadata`'s
+  `langgraph_version` diagnostic, which always reported `"unknown"` because
+  `langgraph` does not set a module-level `__version__` attribute, to read
+  installed package metadata instead; added the missing second stale-state
+  TOCTOU timing variant test for `FA-01` (state changes after revalidation
+  but before the write, caught only by the atomic `expected_version`
+  guard); and corrected a milestone claim that overstated `RetryPolicy`
+  coverage (no node currently uses one -- retries are handled at the graph
+  level via explicit conditional edges).
+
+### Fixed
+
+- **Guarded `FA-02` recovery correctness.** The guarded write node now
+  reconciles with a stable-key `status_check(...)` immediately before
+  every possible write, inside the write node itself, on every
+  invocation -- not only after an `AMBIGUOUS` acknowledgement, and not in
+  a separate node that ran only once before it. A separate preceding
+  reconciliation node cannot catch a crash between the external effect
+  committing and that node's own return value being checkpointed: resuming
+  re-invokes the write node directly without ever re-running the separate
+  node, so it would blindly reissue the write. Reconciling inside the
+  write node, first, on every invocation closes this gap. New regression
+  test: `tests/langgraph/test_identifiers_retry_resume.py::test_resume_from_pre_write_checkpoint_reconciles_hidden_prior_commit_before_reissuing`.
+- **`IDEMPOTENT_REPLAY` is no longer represented as a newly committed
+  effect.** It previously routed directly to confirmation alongside
+  `COMMITTED` and was reported as an `effect_committed` diagnostic; it now
+  routes through the same explicit post-write reconciliation as
+  `AMBIGUOUS` (deduplication is not, by itself, evidence of a new commit
+  by the replaying invocation) and is never diagnosed as
+  `effect_committed`. New test:
+  `tests/langgraph/test_identifiers_retry_resume.py::test_idempotent_replay_requires_explicit_reconciliation_not_direct_confirmation`.
+- **Custom `graph_provider` contract wording.** The `LangGraphAdapter`
+  docstring previously implied CAV-Bench enforces that *any* custom graph
+  routes every consequential effect through `session.tools`. Corrected:
+  CAV-Bench does not sandbox arbitrary Python code and cannot prevent a
+  custom graph from producing out-of-band effects; only effects recorded
+  through the benchmark environment are ever evaluated as benchmark
+  evidence. The bundled reference fixture does route every consequential
+  effect through `session.tools` and is adversarially tested for it --
+  that claim is preserved, scoped to the bundled fixture specifically.
 - **M-GPI-1: generic protocol gateway core with a REST frontend**
   (`cavbench.gateway`), implementing
   `docs/design/generic-protocol-integration.md` under
@@ -127,6 +184,7 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Documentation
 
+- Rewrote `docs/langgraph-adapter-mapping.md` to distinguish design decisions inherited from the merged PR #6 baseline from implemented runtime behavior, and to document authority evidence, state-read vs. commit-time revalidation, attempted-vs-committed evidence, reconciliation behavior, identifier derivation, synchronous durability, fixture limitations, local-vs-CI validation, and installation/minimal-execution instructions. No official LangChain/LangGraph support, endorsement, adoption, certification, or validation is claimed.
 - Added a draft LangGraph adapter mapping, a non-executable
   `ExecutionAdapter`-shaped skeleton, and contract tests covering
   optional-dependency isolation and honest failure behavior. The mapping

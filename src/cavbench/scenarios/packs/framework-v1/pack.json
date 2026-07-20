@@ -1,0 +1,12 @@
+{
+  "pack_id": "framework-v1",
+  "pack_version": "1.0.0",
+  "schema_version": "1.0",
+  "description": "Initial framework-adapter scenario pack from docs/framework-adapter-brief.md: four deterministic consequential-action scenarios (stale state before commit, ambiguous retry, partial execution, authority change before commit) for exercising framework adapters. Framework-neutral scenario definitions; first exercised by the LangGraph reference fixture.",
+  "scenario_ids": [
+    "FA-01",
+    "FA-02",
+    "FA-03",
+    "FA-04"
+  ]
+}

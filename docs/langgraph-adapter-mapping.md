@@ -1,27 +1,74 @@
 # LangGraph Adapter Mapping
 
-Status: **Draft**
+Status: **Implemented (executable milestone)** — design specified in
+[PR #6](https://github.com/Harimay23/cav-bench/pull/6), implemented by the
+follow-up executable-runtime PR.
 Related framework-neutral RFC: [Issue #3](https://github.com/Harimay23/cav-bench/issues/3), [`docs/framework-adapter-brief.md`](framework-adapter-brief.md)
 Related implementation issue: [Issue #5 — Implement initial CAV-Bench LangGraph adapter](https://github.com/Harimay23/cav-bench/issues/5)
 
 This document specifies how a LangGraph-based agent maps onto CAV-Bench's
-normalized event model and `ExecutionAdapter` protocol. It is
-framework-specific detail that `docs/framework-adapter-brief.md`
-deliberately left out of the framework-neutral specification.
+normalized event model and `ExecutionAdapter` protocol, and documents the
+executable implementation of that mapping. It is framework-specific detail
+that `docs/framework-adapter-brief.md` deliberately left out of the
+framework-neutral specification.
 
-## Integration boundary
+**Provenance.** PR #6 is, and remains, the stable design-stage artifact:
+the integration boundary, trust boundary, event mapping, scenario flows,
+identifier rules, and durability decision below were all specified there
+(and in Issue #5) before any runtime code existed. The executable-runtime
+PR implements the next milestone from Issue #5 on top of that design; where
+a section below describes running code, it is labeled as implemented
+behavior. This is **not** official LangChain or LangGraph support,
+endorsement, adoption, certification, or validation. Community feedback
+through the LangChain Forum informed the architecture; the implementation
+remains independently maintained.
 
-The integration surface is an **external `LangGraphAdapter`** implementing
-`cavbench.adapters.protocol.ExecutionAdapter`
-(`name`, `version`, `run(session: AdapterSession) -> AdapterResult`) — the
-same protocol every other adapter, including CAV-Bench's own five baseline
-profiles, implements. `LangGraphAdapter` is not a fork of CAV-Bench and
-requires no evaluator or runtime changes to plug in (`docs/architecture.md`).
+## Design decisions inherited from PR #6
 
-A **reference LangGraph graph** used to exercise the adapter's four
-scenarios is a deterministic test fixture only. It demonstrates the mapping
-below works end to end; it is not a production agent design and is not
-presented as one (see [Non-goals](#non-goals)).
+Unchanged from the design stage, and binding on the implementation:
+
+- **External adapter as the integration surface.** `LangGraphAdapter`
+  implements `cavbench.adapters.protocol.ExecutionAdapter` (`name`,
+  `version`, `run(session) -> AdapterResult`) — the same protocol every
+  other adapter implements. No evaluator or runtime changes.
+- **Trust boundary.** The CAV-Bench tool facade is the sole adapter-visible
+  execution path; `BenchmarkEnvironment`, the canonical trace, and the
+  side-effect ledger are the authoritative sources of attempted and
+  committed-effect truth (see below).
+- **LangGraph is an optional dependency** (see below).
+- **Reference graph is a deterministic test fixture**, not a production
+  agent design (see [Fixture limitations](#fixture-limitations)).
+- **Normalized event vocabulary**, the **four scenario flows**, **stable
+  operation/idempotency identifiers**, **`durability="sync"`**, and
+  **fine-grained node boundaries**, each detailed below.
+
+## Implemented runtime behavior (this milestone)
+
+What now exists as running, tested code:
+
+- `src/cavbench/adapters/langgraph.py` — a real `LangGraphAdapter`. It
+  compiles a graph (by default the reference fixture), injects the
+  CAV-Bench session and a durable `thread_id` into the run's configurable
+  context, invokes the graph with `durability="sync"` under an in-memory
+  checkpointer, and maps the graph's terminal state to an untrusted
+  `AdapterResult`.
+- `src/cavbench/adapters/langgraph_reference.py` — the deterministic
+  reference graphs for the four `framework-v1` scenarios, in two variants:
+  `guarded` (commit-time revalidation, stable-key reconciliation,
+  compensation routing, commit-time authority recheck) and `naive` (the
+  deliberately flawed control used to demonstrate outcome-pass vs.
+  commit-valid-fail).
+- `src/cavbench/scenarios/packs/framework-v1/` — the four
+  framework-adapter scenarios from `docs/framework-adapter-brief.md`
+  (`FA-01` stale state, `FA-02` ambiguous retry, `FA-03` partial
+  execution, `FA-04` authority change), as ordinary schema-validated
+  scenarios usable by any adapter.
+- `tests/langgraph/` — runtime, trust-boundary/adversarial,
+  identifier-stability (retry + checkpoint resume), and determinism tests;
+  `tests/contract/test_langgraph_adapter_contract.py` — dependency
+  isolation and protocol conformance, run *without* langgraph installed.
+- `examples/langgraph_adapter.py` — the runnable outcome-pass vs.
+  commit-valid-fail demonstration.
 
 ## Trust boundary
 
@@ -51,32 +98,71 @@ never sees LangGraph state directly and never trusts anything the adapter
 or the graph self-reports (`AdapterResult.completion_status` is compared
 against a benchmark-derived floor, never trusted — same as every adapter).
 
+Implemented enforcement: the fixture's `naive` variants *do* claim clean
+success — in graph state, in `completion_status`, and in their
+normalized-event diagnostics — while the benchmark's own evidence shows a
+stale, duplicated, incomplete, or unauthorized commit.
+`tests/langgraph/test_trust_boundary.py` asserts the evaluator follows the
+benchmark evidence in every such case, that forged trust-boundary metadata
+changes nothing, and that the integration code never references the
+harness-owned components (`BenchmarkEnvironment`, state store, ledger,
+oracle) directly.
+
 ## Optional dependency model
 
 LangGraph is **not** a core CAV-Bench dependency. `import cavbench` and the
-core benchmark run (`cavbench doctor`, `cavbench ablate`, ...) must never
-require LangGraph to be installed. `src/cavbench/adapters/langgraph.py`
-never imports `langgraph` at module level — only lazily, inside the methods
-that actually need it, so that importing the module itself succeeds
-regardless of whether LangGraph is installed. A future PR may add a
-`langgraph` optional-dependency extra (analogous to the existing
-`reporting` extra in `pyproject.toml`) once the real graph is implemented;
-this is out of scope for the design-stage skeleton.
+core benchmark run (`cavbench doctor`, `cavbench ablate`, ...) never
+require LangGraph to be installed. Neither
+`src/cavbench/adapters/langgraph.py` nor
+`src/cavbench/adapters/langgraph_reference.py` imports `langgraph` at
+module level — only lazily, inside the code paths that actually execute a
+graph. A missing dependency surfaces as a clear invocation-time
+`ImportError` from `LangGraphAdapter.run(...)` naming the extra to install.
+
+Implemented as the `langgraph` optional extra in `pyproject.toml`
+(analogous to the existing `reporting` extra), with the smallest justified
+range for the APIs actually used (`StateGraph`, `add_conditional_edges`,
+`compile(checkpointer=..., interrupt_after=...)`,
+`invoke(..., durability=...)`, `langgraph.config.get_config`,
+`InMemorySaver`): `langgraph>=0.6,<2` — `0.6` introduced the `durability`
+invoke argument used by the adapter, and `<2` is a one-major-version buffer
+under the project's ordinary semver trust assumption (no breaking changes
+within a documented major version), not a claim that every version in that
+range has been individually tested.
+
+**What is actually continuously tested, and where** (see
+[Local vs. CI validation](#local-vs-ci-validation) for the full
+distinction): the `langgraph` CI job (`.github/workflows/ci.yml`) runs the
+full `tests/langgraph/` suite, `examples/langgraph_adapter.py`, and
+`cavbench validate --pack framework-v1` against exactly two resolved
+versions on every push/PR — the declared floor, `langgraph==0.6.0`, and
+whatever `pip install ".[langgraph]"` resolves to as "latest" at CI run
+time (currently `1.2.9`). Versions strictly between the floor and latest
+are **not** individually exercised by CI; if the range needs narrowing or
+splitting because an intermediate release turns out to be incompatible,
+that would surface as a `langgraph` job failure on a version bump, not
+silently.
 
 ## Normalized-event-to-LangGraph mapping
 
-| Normalized event (`docs/framework-adapter-brief.md`) | LangGraph evidence |
+| Normalized event (`docs/framework-adapter-brief.md`) | LangGraph evidence (implemented in the reference fixture) |
 |---|---|
-| `intent_recorded` | The initial input written into graph/thread state before the first node runs. |
-| `authority_checked` | An explicit, externally observable authorization decision point — typically an `interrupt()` / `Command(resume=...)` step. This makes the decision *observable*; it is **not itself authorization truth**. See [Authority: observability versus truth](#authority-observability-versus-truth). |
+| `intent_recorded` | The initial input written into graph/thread state before the first node runs (the fixture's `record_intent` node). |
+| `authority_checked` | An explicit, externally observable authorization decision. The reference fixture implements this as a fresh authoritative read through the tool facade, recorded by the benchmark as a `tool_read` (see [Authority evidence](#authority-evidence)); the general contract also permits an `interrupt()` / `Command(resume=...)` step for a future real-agent adapter. Either way this makes the decision *observable*; it is **not itself authorization truth**. See [Authority: observability versus truth](#authority-observability-versus-truth). |
 | `state_read` | A node's read via a CAV-Bench tool call (`session.tools.read(...)`), captured in that node's output. |
-| `state_revalidated` | A node that re-reads state and semantically re-evaluates the action immediately before a commit-issuing node. See [Stale-state TOCTOU protection](#stale-state-toctou-protection) — this alone does not close the race. |
-| `effect_attempted` | Backed by the benchmark-owned `tool_call_attempt` trace event, recorded synchronously near the beginning of `BenchmarkEnvironment.commit()` — after `ToolFacade.write()` delegates the operation and before the environment applies fault hooks, validation checks, idempotency checks, or external effects. `on_tool_start`/`astream_events` and task-stream (`stream_mode="tasks"`) evidence are *corroborating ordering evidence only* — see [Evidence spine](#evidence-spine-attempted-versus-committed). |
-| `effect_committed` | Authoritative only when backed by the benchmark-owned `side_effect_commit` trace event / side-effect ledger — never from a LangGraph-reported fact. `ToolResult.status="COMMITTED"` gives the adapter immediate confirmation; `status="AMBIGUOUS"` gives it neither confirmation nor disconfirmation and requires reconciliation. See [Trust boundary](#trust-boundary) and [Evidence spine](#evidence-spine-attempted-versus-committed). |
-| `effect_reconciled` | A node that calls `session.tools.status_check(...)` with the same stable operation identity, performed **unconditionally** before any retry — see [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
-| `compensation_started` / `compensation_completed` | A dedicated compensation node, reached via a conditional edge when a downstream node reports failure. |
-| `escalation_created` | A node calling `session.escalate(...)`, optionally surfaced to a human via LangGraph's `interrupt()` / human-in-the-loop mechanism. |
+| `state_revalidated` | A node that re-reads state immediately before a commit-issuing node and re-evaluates the action against it (see [State read vs. commit-time revalidation](#state-read-versus-commit-time-revalidation) and [Stale-state TOCTOU protection](#stale-state-toctou-protection) — revalidation alone does not close the race). |
+| `effect_attempted` | Backed by the benchmark-owned `tool_call_attempt` trace event, recorded synchronously near the beginning of `BenchmarkEnvironment.commit()` — after `ToolFacade.write()` delegates the operation and before the environment applies fault hooks, validation checks, idempotency checks, or external effects. Entering a graph node alone is **not** sufficient evidence: a node may run and exit without ever invoking a consequential tool. See [Evidence spine](#evidence-spine-attempted-versus-committed). |
+| `effect_committed` | Authoritative only when backed by the benchmark-owned `side_effect_commit` trace event / side-effect ledger — never from a LangGraph-reported fact. `ToolResult.status="COMMITTED"` gives the adapter immediate confirmation; `status="AMBIGUOUS"` gives it neither confirmation nor disconfirmation and requires reconciliation. See [Trust boundary](#trust-boundary), [Evidence spine](#evidence-spine-attempted-versus-committed), and [Attempted versus committed](#attempted-versus-committed) for the implemented `FA-02`/`FA-03` behavior. |
+| `effect_reconciled` | A call to `session.tools.status_check(...)` with the same stable `idempotency_key`, performed **unconditionally** before any write and again before any retry (implemented: `FA-02`'s `commit_refund` node reconciles immediately before every possible write, on every invocation; its dedicated `reconcile` node reconciles again after an `AMBIGUOUS` or `IDEMPOTENT_REPLAY` write response). See [Reconciliation behavior](#reconciliation-behavior) and [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
+| `compensation_started` / `compensation_completed` | A dedicated compensation node, reached via a conditional edge when a downstream node's write returns `FAILED` (implemented: `FA-03`'s `compensate` node). |
+| `escalation_created` | A node calling `session.escalate(...)` (implemented in the `FA-02`/`FA-03`/`FA-04` block/escalate nodes), optionally surfaced to a human via LangGraph's `interrupt()` / human-in-the-loop mechanism for a future real-agent adapter. |
 | `outcome_reported` | The graph's terminal node output, mapped to `AdapterResult.completion_status` — untrusted, exactly as for every other adapter. |
+
+The reference fixture also records this vocabulary into graph state as a
+diagnostic stream surfaced via `AdapterResult.metadata["normalized_events"]`
+— explicitly **untrusted**; tests assert both that the vocabulary is used
+consistently and that the evaluator's output is unchanged when the stream
+is stripped or forged.
 
 ## Evidence spine: attempted versus committed
 
@@ -167,11 +253,18 @@ must use the same **stable operation identity** throughout (see
 [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation))
 — never a freshly generated identifier per call.
 
-This document does **not** specify a complete runtime normalized-event
-emission mechanism — deciding exactly which LangGraph callback/stream hooks
-the adapter subscribes to, and how it correlates them with tool-facade
-calls into the normalized event stream, is out of scope for this
-design-stage PR. It is recorded as a required item under
+**The executable reference fixture emits normalized diagnostic events
+through checkpointed graph state**, not through LangGraph's own
+callback/stream hooks (`on_tool_start`/`astream_events`,
+`stream_mode="tasks"`) — each node explicitly appends to the
+`normalized_events` list it returns, correlated directly with the
+tool-facade call that node makes. This sidesteps the granularity mismatch
+discussed above entirely, rather than resolving it: **it does not
+implement a general callback- or stream-correlation layer for arbitrary
+LangGraph applications.** A generalized emission mechanism — one that
+could observe an arbitrary graph's own tool/task streams and correlate
+them with tool-facade calls without the graph's own nodes cooperating —
+remains future work; see
 [Next implementation milestones](#next-implementation-milestones).
 
 ## Authority: observability versus truth
@@ -236,54 +329,82 @@ disagreement with the review.
   hard refusal comparable to the `expected_version` compare-and-set guard —
   requires a separately reviewed runtime design change** to carry
   authorization context into `ToolFacade.write()` /
-  `BenchmarkEnvironment.commit()`. It is not implemented in this PR (see
-  [Next implementation milestones](#next-implementation-milestones)), and
-  no future PR — including PR #8 — may claim this capability unless it is
-  actually implemented and tested through that approved runtime change.
+  `BenchmarkEnvironment.commit()`. **This PR does not implement or claim
+  atomic commit-boundary authority enforcement.** That capability requires
+  a separately reviewed runtime change (see
+  [Next implementation milestones](#next-implementation-milestones)) and
+  must not be claimed as already implemented until it actually is.
 
 ## Four scenario execution flows
 
-The same four scenarios from `docs/framework-adapter-brief.md`, described
-in terms of the graph:
+The four scenarios from `docs/framework-adapter-brief.md`, implemented as
+the `framework-v1` pack and executed by the reference graphs:
 
-1. **Stale state before commit.** A `state_read` node observes a resource's
-   version, checkpointed via `durability="sync"`. Commit-time revalidation
-   is **not** simply reading the newest version and proceeding: immediately
-   before commit, the revalidation node must (a) read current state, (b)
-   re-evaluate the action's preconditions, intent, scope, and authority
-   against that current state — not just its version number, and (c)
-   block, clarify, or escalate without committing if the change invalidates
-   the action. See [Stale-state TOCTOU protection](#stale-state-toctou-protection)
-   for why this is still not sufficient on its own.
-2. **Ambiguous retry after a committed operation.** A tool-calling node's
-   `session.tools.write(...)` call actually commits, but the fixture
-   simulates a lost response — injected **before the write super-step's
-   checkpoint is persisted** (see
-   [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation)),
-   mirroring CAV-Bench's own `ambiguous_response` fault mode. Per
-   [Ambiguous response](#ambiguous-response-what-toolresult-cannot-tell-the-adapter),
-   the resulting `status="AMBIGUOUS"` tells the node neither that the
-   effect committed nor that it didn't. On resume, the node must derive the
-   *same* operation identity it used originally from checkpointed state and
-   perform **unconditional** reconciliation (`session.tools.status_check(...)`)
-   before ever attempting a second write.
-3. **Partial workflow execution.** A first node's effect commits; a
-   downstream node's tool call is force-failed. A conditional edge routes
-   to a compensation node (or an escalation node, if no compensation is
-   possible), and the terminal node's `completion_status` must not claim
-   `"success"`.
-4. **Authority change before execution.** An `interrupt()`/
-   `Command(resume=...)` step makes an authorization decision observable at
-   planning time — in CI, resolved with a deterministic scripted resume
-   value, never a human. The fixture then revokes authority before the
-   commit node runs. Per
-   [Authority: observability versus truth](#authority-observability-versus-truth),
-   the earlier resume payload is not authorization truth: the commit node
-   must perform a fresh authority read and semantic re-check immediately
-   before `session.tools.write(...)`, regardless of what the resume payload
-   said earlier. This narrows, but — per (C) in that section — does not
-   atomically close, the authority TOCTOU window, since the current write
-   boundary does not itself adjudicate authorization.
+1. **Stale state before commit (`FA-01`).** A `state_read` node observes
+   the order at a known version; the scenario injects an external state
+   change (the order ships) after that read. Commit-time revalidation is
+   **not** simply reading the newest version and proceeding: the
+   `revalidate` node (a) performs a distinct commit-time reread, (b)
+   re-evaluates the action's precondition, intent, scope, and authority
+   against the current state, (c) blocks/clarifies/escalates without
+   committing if the change invalidates the action, and only otherwise (d)
+   commits with the revalidated version as `expected_version`. In `FA-01`
+   the precondition no longer holds, so the guarded graph refuses; the
+   naive graph commits against the stale observation and the evaluator
+   derives `TS_STALE_WITNESS` from environment-recorded versions.
+2. **Ambiguous retry after a committed operation (`FA-02`).** The
+   `commit_refund` node reconciles via `session.tools.status_check(...)`
+   with the *same* stable `idempotency_key`, derived from durable
+   identity, **immediately before every possible write** — including its
+   first invocation. Finding `NOT_FOUND`, it writes once; the scenario's
+   `ambiguous_response` fault swallows the acknowledgement, and the
+   dedicated `reconcile` node performs a second status check that finds
+   the commit confirmed, ending the run with exactly one ledger effect. If
+   this node is instead re-invoked after a crash that lost its own result
+   before LangGraph checkpointed it — the external effect having already
+   committed — its own pre-write status check finds `COMMITTED` and skips
+   the write entirely, rather than blindly reissuing it (see
+   [Reconciliation behavior](#reconciliation-behavior) for why a separate
+   preceding node cannot catch this case). A replay under the same key
+   that does reach `session.tools.write(...)` is answered
+   `IDEMPOTENT_REPLAY` and does not grow the ledger, but is routed through
+   the same explicit post-write reconciliation as `AMBIGUOUS` — never
+   treated as direct confirmation. The naive graph retries under a fresh
+   per-attempt key and produces `EI_DUPLICATE_LOGICAL_EFFECT`.
+3. **Partial workflow execution (`FA-03`).** The `reserve` node's effect
+   commits; the scenario force-fails the downstream `capture` write. A
+   conditional edge routes to the `compensate` node (releasing the
+   committed reservation, with `compensation_for` linking it to the
+   original step; escalation if compensation itself fails), and the
+   terminal report is `"partial"` — never terminal success while required
+   work is incomplete. The naive graph ignores the failure and reports
+   success; the evaluator flags the missing compensation and the false
+   success report from benchmark-derived facts.
+4. **Authority change before commit (`FA-04`).** A planning-time authority
+   check is recorded as an externally observable authoritative read; the
+   scenario then reassigns ownership of the order. The guarded graph's
+   `recheck_authority` node performs a second, equally independent
+   authority check immediately before the consequential effect — a fresh
+   read, never the checkpointed planning-time flag or an earlier graph
+   branch — and does not call `session.tools.write(...)` because current
+   authority no longer permits it (it escalates instead). The naive graph
+   trusts its checkpointed `authorized_at_plan` flag, commits, and the
+   evaluator derives `AV_PRINCIPAL_NOT_AUTHORIZED` from the ledger.
+
+## Authority evidence
+
+CAV-Bench's environment models authority as authoritative resource state
+(`owner`, `tenant`) whose reads the benchmark itself records as
+`tool_read` events — so an authority check is externally observable
+evidence exactly when it is a fresh facade read, and the evaluator's
+authority dimension is derived from what actually committed, not from any
+adapter-side conclusion. The reference fixture's authority checks
+(planning-time and commit-time in `FA-04`, and as part of every guarded
+revalidation) are implemented this way. A LangGraph human-in-the-loop
+interrupt resolved through `Command(resume=...)` remains a valid
+alternative source of an explicit authorization decision for a future
+real-agent adapter; the fixture does not need one because the benchmark
+environment itself provides the observable authority record.
 
 ## Stale-state TOCTOU protection
 
@@ -370,31 +491,20 @@ checkpointed state whether the write committed, which is what forces real
 reconciliation rather than a reconciliation step that never has anything to
 do.
 
-## `durability="sync"`
+## State read versus commit-time revalidation
 
-Graph execution must use LangGraph's `durability="sync"` mode: a checkpoint
-is written synchronously after each super-step completes, before the graph
-proceeds to the next step. This is the conservative choice — it guarantees
-that any resume observes an accurate, complete record of what already
-executed, rather than resuming from a checkpoint that predates a step whose
-outcome is unknown. Weaker durability modes are out of scope until there is
-a specific, documented reason to relax this.
+`state_read` (observe once, act later) and `state_revalidated` (a distinct
+reread immediately before commit, plus re-evaluation of precondition,
+intent, scope, and authority against the fresh observation) are separate
+events and separate nodes in the fixture. A node that re-reads the version
+but skips the re-evaluation has not revalidated anything — and a node that
+"revalidates" by simply adopting the newest version and proceeding is the
+exact anti-pattern `FA-01` exists to catch. The benchmark does not trust
+either label: temporal validity is derived mechanically by comparing the
+last version observed via `tool_read` against the version authoritative at
+the moment of commit (DECISION_LOG D-015).
 
-## Fine-grained node boundaries
-
-One LangGraph node (or `@task`, under the functional API) per logical
-CAV-Bench step — never a coarse node that bundles multiple consequential
-actions. This is what makes per-step checkpointing, per-step operation
-identity, and per-step evidence collection (the normalized event mapping
-above) meaningful, and it is specifically what makes the task-stream and
-tool-stream granularities discussed in
-[Evidence spine](#evidence-spine-attempted-versus-committed) coincide in
-the reference fixture. A node that silently performs two consequential
-writes internally would make it impossible for the adapter to report
-`effect_attempted` / `effect_committed` evidence at the correct
-granularity.
-
-## Attempted-versus-committed limitation
+## Attempted versus committed
 
 LangGraph's own state reflects that a node *ran* and what it *returned* —
 it does not, by itself, distinguish "the external system confirmed this
@@ -415,6 +525,247 @@ generally and [Evidence spine](#evidence-spine-attempted-versus-committed)
 describes mechanically; it is called out separately here because it is the
 most common way a framework integration would accidentally re-introduce a
 self-grading path.
+
+On the benchmark side the two are distinct event types (`tool_call_attempt`
+vs. `side_effect_commit`), and attempted, acknowledged-ambiguous,
+committed, reconciled, compensated, and reported effects remain distinct
+facts throughout: `FA-03`'s failed capture leaves an attempt plus a
+`commit_rejected`, never a commit; `FA-02`'s ambiguous write leaves a
+commit whose acknowledgement was lost, resolved only by reconciliation
+(never by the adapter inferring an outcome from the `AMBIGUOUS` response
+itself).
+
+## Reconciliation behavior
+
+The guarded FA-02 write node (`fa02_commit_refund`) reconciles via a
+stable-key `status_check(idempotency_key=<same stable key>)` **immediately
+before every possible write, inside the write node itself, on every
+invocation** — not only after observing an `AMBIGUOUS` acknowledgement,
+and not in a separate node that runs once before it.
+
+**Why a separate preceding reconciliation node is not sufficient:** a
+checkpoint could be persisted after that separate node runs; the external
+effect could then commit inside the write node; and the process could
+crash before the write node's own return value is checkpointed. Resuming
+from that checkpoint re-invokes the write node directly — the separate
+reconciliation node never runs again — so a design that only reconciled
+*before entering* the write node would blindly reissue the write against
+an operation that had already committed. Performing the status check
+*inside* the write node, first, on every invocation (including the very
+first), is what closes this gap:
+
+- **Pre-write status check.** `NOT_FOUND` means nothing has committed yet
+  under this key; the node proceeds to write once. `COMMITTED` means a
+  prior invocation of this same node already committed the effect but its
+  result was never checkpointed (the crash-before-checkpoint case above);
+  the node does not write again, and does not fabricate
+  `effect_attempted`/`effect_committed` diagnostics for the write it never
+  issued.
+- **After the write:** `COMMITTED` may route directly to confirmation.
+  `AMBIGUOUS` and `IDEMPOTENT_REPLAY` both route to the same explicit
+  post-write reconciliation node — `IDEMPOTENT_REPLAY` indicates the
+  environment deduplicated against an already-committed effect, not a new
+  commit by this invocation, and by itself is **not sufficient evidence
+  for Recovery**; it must not be treated as direct confirmation. Only a
+  `NOT_FOUND` post-write reconciliation result can route back to a
+  (bounded) retry of the write, under the same key, so even a
+  wrongly-repeated write is deduplicated by the environment.
+
+Tests assert the full ordering (pre-write `NOT_FOUND` reconciliation
+precedes the one write attempt; a post-write reconciliation follows the
+commit), the single ledger entry, the safe-replay property, and —
+separately — the precise crash-before-checkpoint interleaving described
+above (`tests/langgraph/test_identifiers_retry_resume.py`).
+
+## Stable identifier derivation
+
+Both `operation_id` and `idempotency_key` are derived from **durable,
+checkpointed identity only** — never freshly generated (e.g. via
+`uuid4()`) on a node invocation:
+
+- `logical_operation_id` comes from the scenario plan's step (durable
+  across everything).
+- `idempotency_key = f"lg:{scenario_id}:{thread_id}:{step_id}"`
+  (`derive_idempotency_key(...)` in the fixture) — scenario identity,
+  LangGraph thread identity, and the plan step the node maps 1:1 to.
+
+A LangGraph resume after a crash or interrupt re-executes from the last
+checkpoint; because the key is a pure function of durable identity, the
+resumed run re-derives the *same* key, so CAV-Bench's duplicate-effect
+detection distinguishes a legitimate resume/replay (`IDEMPOTENT_REPLAY`,
+ledger unchanged) from a genuinely new logical operation. If the key were
+regenerated per invocation, a safe resume would be indistinguishable from
+a duplicate — the naive `FA-02` variant demonstrates precisely this
+failure. `tests/langgraph/test_identifiers_retry_resume.py` exercises
+stability across a checkpoint interrupt/resume (a genuine LangGraph
+crash-and-resume, `test_checkpoint_resume_reuses_the_same_identifiers_and_reconciles_before_writing`)
+and a manual replay.
+
+**Why `thread_id` + `step_id` alone is a sufficient discriminator for this
+fixture, but not in general.** Each `framework-v1` scenario's plan has each
+`step_id` appear **at most once** per run — there are no loops, no `Send`
+fan-out, and no node that maps to more than one logical operation. Under
+that constraint, `step_id` alone already uniquely identifies the operation
+within a thread, so no additional per-operation discriminator (an
+operation counter, loop iteration index, `Send` index, or map index, per
+[Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation))
+is needed. **A general LangGraph adapter — one whose graphs may loop, fan
+out, or otherwise invoke the same node more than once per logical
+operation — must add such a discriminator to the key composition**, or
+distinct operations within the same node would collide on the same
+`idempotency_key`. This fixture does not need one only because its graphs
+are scenario-shaped and non-repeating (see
+[Fixture limitations](#fixture-limitations)).
+
+**`RetryPolicy` is not currently wired into any node.** The fixture handles
+retries at the graph level instead — an explicit conditional edge routes
+back to a write node (e.g. `fa02_route_after_reconcile` routing to
+`commit_refund` again) as an ordinary graph step, not as LangGraph's
+automatic node-level retry mechanism. `derive_idempotency_key(...)` is a
+pure function of scenario/thread/step identity with no invocation counter,
+so it would remain stable if a future scenario did attach a `RetryPolicy`
+to a node — but that specific mechanism is not exercised by any current
+test, and no milestone claim below should say otherwise.
+
+## `durability="sync"`
+
+Graph execution uses LangGraph's `durability="sync"` mode (available since
+langgraph 0.6) so completed super-step checkpoints are persisted
+synchronously before execution advances. This reduces checkpoint lag and
+ensures that completed super-steps are durably represented before later
+graph work proceeds — a resume never observes a checkpoint that predates a
+*completed* step. The adapter passes it on every `invoke`. Weaker
+durability modes remain out of scope until there is a specific, documented
+reason to relax this.
+
+**It does not eliminate the external-effect/checkpoint gap inside a
+running node.** An external effect may commit and the process may fail
+before that node's own returned state is checkpointed. In that
+interleaving, the last durable graph checkpoint can still predate the
+committed effect — synchronous durability only guarantees that a
+*completed* node's result is checkpointed before the graph proceeds; it
+says nothing about a node whose own execution is interrupted mid-flight.
+Stable operation identity, environment-owned idempotency, and the guarded
+`FA-02` node's pre-write status reconciliation (see
+[Reconciliation behavior](#reconciliation-behavior)) remain necessary for
+safe recovery from that interleaving — this is precisely the case the
+hidden-prior-commit regression test exercises.
+
+Two distinct resume tests cover the two distinct cases:
+`test_checkpoint_resume_reuses_the_same_identifiers_and_reconciles_before_writing`
+interrupts *after* `commit_refund` has already returned (`interrupt_after=
+["commit_refund"]`), so the checkpoint it resumes from already reflects a
+*completed* node execution — this is the case synchronous durability
+directly covers.
+`test_resume_from_pre_write_checkpoint_reconciles_hidden_prior_commit_before_reissuing`
+interrupts *before* `commit_refund` ever runs (`interrupt_after=
+["read_state"]`) and then commits the effect directly through the tool
+facade to simulate `commit_refund`'s own execution having happened but
+never been checkpointed — this is the external-effect/checkpoint gap
+synchronous durability does *not* close, and what the write node's
+pre-write reconciliation exists to handle.
+
+## Fine-grained node boundaries
+
+One LangGraph node per logical CAV-Bench step — never a coarse node that
+bundles multiple consequential actions. This is what makes per-step
+checkpointing, per-step `operation_id`/`idempotency_key` derivation, and
+per-step evidence collection meaningful. In the fixture, every
+consequential write lives in its own node (`commit`, `commit_refund`,
+`reserve`, `capture`, `compensate`), and each node's identifiers derive
+from the plan step it implements.
+
+## Fixture limitations
+
+The reference graphs are deterministic test fixtures with deliberate
+limitations; they are **not** a recommended production architecture:
+
+- No model calls, no prompts, no nondeterminism — control flow is fixed
+  per scenario and variant.
+- Graph structure is scenario-shaped: each `framework-v1` scenario has its
+  own small graph, wired from the scenario's adapter-visible plan. Real
+  agents do not know the scenario ahead of time.
+- The `naive` variants are intentionally defective controls for the
+  outcome-pass vs. commit-valid-fail demonstration. Do not copy them.
+- Checkpointing uses the in-memory saver; production persistence,
+  multi-actor authorization flows, human-in-the-loop interrupts, streaming
+  event capture (`astream_events`), and MCP/REST tool transport are all
+  out of scope for this milestone.
+- The fixture covers the four `framework-v1` scenarios only; it is not a
+  general LangGraph-agent harness.
+
+## Local vs. CI validation
+
+Two distinct things can be called "the tests pass," and this document
+keeps them separate:
+
+- **Local validation** is whatever a contributor (or an agent) runs by
+  hand in a development environment — e.g. `pytest`,
+  `pytest tests/langgraph`, `ruff check .`, `mypy src/cavbench`,
+  `python -m build`, ad hoc venvs pinned to a specific `langgraph`
+  version. It is useful for iterating and for spot-checking versions
+  outside the CI matrix, but it is **not** a substitute for CI: a local
+  run reflects one machine, one Python build, and whatever was installed
+  by hand at that moment, and it does not run on every push or PR.
+- **CI validation** is exactly what `.github/workflows/ci.yml` runs on
+  every push to `main` and every pull request, and is the only validation
+  that gates merges. As of this milestone it includes, specifically for
+  the LangGraph integration:
+  - `test` (unchanged): `pytest -q` across Python 3.11/3.12/3.13, **without**
+    the `langgraph` extra installed — this is what continuously verifies
+    core dependency isolation (`tests/langgraph/` skips cleanly) and the
+    missing-dependency error path (`tests/contract/test_langgraph_adapter_contract.py`).
+  - `langgraph` (new): a two-leg matrix (`langgraph==0.6.0` and the
+    range's "latest" resolved version) that installs
+    `.[dev,langgraph]`, then runs `pytest -q tests/langgraph`,
+    `python examples/langgraph_adapter.py`, and
+    `cavbench validate --pack framework-v1` — this is what continuously
+    exercises the real LangGraph runtime, not just source that happens to
+    reference it.
+  - `wheel-smoke-test-langgraph` (new): installs the *built wheel* with
+    its `[langgraph]` extra (not an editable source install) and runs
+    `cavbench validate --pack framework-v1` plus the example, so the
+    packaged optional extra is verified too, not only the source tree.
+
+Any claim in this document about what is "tested" or "exercised" refers to
+this CI matrix, not to a one-off local run.
+
+## Installation and minimal execution
+
+```bash
+pip install "cav-bench[langgraph]"   # core install never requires langgraph
+```
+
+Minimal run (the adapter is driven through the public Python API, like any
+custom adapter — see `docs/adapter-authoring.md`):
+
+```python
+from cavbench.adapters.langgraph import LangGraphAdapter
+from cavbench.evaluation.evaluator import DeterministicEvaluator
+from cavbench.runtime.environment import BenchmarkEnvironment
+from cavbench.runtime.session import AdapterSession
+from cavbench.runtime.tools import ToolFacade
+from cavbench.scenarios.loader import load_builtin_pack
+
+pack = load_builtin_pack("framework-v1")
+scenario = pack.get("FA-02")
+env = BenchmarkEnvironment(scenario, seed=0, run_id="demo")
+session = AdapterSession(scenario.view, ToolFacade(env))
+result = LangGraphAdapter().run(session)
+trace = env.finalize({
+    "adapter_name": "langgraph",
+    "adapter_version": "0.1.0",
+    "final_message": result.final_message,
+    "completion_status": result.completion_status,
+})
+print(DeterministicEvaluator().evaluate(scenario, trace).commit_valid_success)
+```
+
+`python examples/langgraph_adapter.py` runs the full outcome-pass vs.
+commit-valid-fail demonstration. Without the extra installed,
+`LangGraphAdapter().run(...)` raises a clear `ImportError` naming
+`cav-bench[langgraph]`; importing `cavbench` (including the adapter
+modules) works regardless.
 
 ## External review status
 
@@ -457,10 +808,15 @@ depended on LangGraph actually being absent from the test environment; it
 now simulates that path via monkeypatching regardless of what is
 installed).
 
+**Neither PR #6's mapping document nor this executable-milestone
+implementation has been reviewed by a LangGraph maintainer.** Community
+feedback through the LangChain Forum informed the architecture; the
+implementation remains independently maintained.
+
 This is **not**: official LangChain endorsement, official LangGraph
-endorsement, LangGraph maintainer approval, adoption, or production
-validation. See [Non-goals](#non-goals) and Issue #3's open maintainer
-questions, which remain open.
+endorsement, LangGraph maintainer approval, adoption, certification, or
+production validation. See [Non-goals](#non-goals) and Issue #3's open
+maintainer questions, which remain open.
 
 ## Non-goals
 
@@ -469,42 +825,79 @@ clarifications:
 
 - Not a comparison of LangGraph against other frameworks or against model
   intelligence.
-- Not a claim of official LangGraph support, endorsement, or adoption.
+- Not a claim of official LangGraph support, endorsement, adoption,
+  certification, or validation.
 - Not a production agent design — the reference graph is a test fixture.
-- Does not change CAV-Bench's evaluator, scoring definitions, or validity
-  dimensions.
+- Does not change CAV-Bench's evaluator, scoring definitions, validity
+  dimensions, or canonical golden results.
 - Does not make LangGraph a core CAV-Bench dependency.
+- No MCP or REST integrations, commerce-specific scenario packs, or
+  broader case-study material in this milestone.
 
-## Next implementation milestones
+## Implementation milestones
 
-1. Design-stage skeleton (this PR): `LangGraphAdapter` satisfying the
+1. ~~Design-stage skeleton (PR #6): `LangGraphAdapter` satisfying the
    `ExecutionAdapter` protocol shape, raising a clear development-stage
-   error on `run()`; no real graph.
-2. Reference fixture graph implementing the four scenarios above with
+   error on `run()`; no real graph.~~ **Done (PR #6 — remains the
+   design-stage artifact).**
+2. ~~Reference fixture graph implementing the four scenarios above with
    `durability="sync"` and fine-grained nodes, including the two
    stale-state timing variants from
    [Stale-state TOCTOU protection](#stale-state-toctou-protection) and the
    checkpoint-timed lost-response fixture from
-   [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation).
-3. Operation identity derivation from checkpointed `thread_id` + node/task
+   [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation).~~
+   **Done (this milestone).** The canonical `FA-01` fixture exercises the
+   first timing variant (state changes before revalidation, caught by the
+   revalidation node itself). The second timing variant (state changes
+   after revalidation but before the write, caught only by the atomic
+   `expected_version` compare-and-set guard) is exercised by
+   `tests/langgraph/test_runtime_scenarios.py::test_stale_state_scenario_second_timing_variant_relies_on_the_atomic_guard`,
+   which constructs the same scenario with the fault moved from
+   `after_read` to `before_commit` rather than adding a second scenario
+   file for what is the same write step. The checkpoint-timed
+   lost-response fixture is `FA-02`, exercised by
+   `tests/langgraph/test_identifiers_retry_resume.py`.
+3. ~~Operation identity derivation from checkpointed `thread_id` + node/task
    identity + a durable per-operation discriminator (not `thread_id` +
-   node name alone), exercised by the ambiguous-retry scenario across both
-   `RetryPolicy` retries and crash/interrupt resume.
-4. The runtime normalized-event emission mechanism deferred in
-   [Evidence spine](#evidence-spine-attempted-versus-committed): deciding
-   which LangGraph callback/stream hooks the adapter subscribes to and how
-   they correlate with tool-facade calls.
-5. Automated tests running all four scenarios through the real graph and
+   node name alone).~~ **Partially done (this milestone) — see
+   [Stable identifier derivation](#stable-identifier-derivation): exercised
+   by the ambiguous-retry scenario across a genuine checkpoint interrupt
+   and resume, and stability is proven for this fixture's non-repeating,
+   scenario-shaped graphs (`thread_id` + `step_id` alone is a sufficient
+   discriminator here). `RetryPolicy`-triggered node-level retry is
+   **not** wired into any node or exercised by any test. A durable
+   per-operation discriminator beyond `step_id` (an operation counter,
+   loop iteration index, `Send` index, or map index) remains required for
+   a general adapter whose graphs loop, fan out, or invoke the same node
+   more than once per logical operation — this fixture does not need one.**
+4. ~~The runtime normalized-event emission mechanism deferred in
+   [Evidence spine](#evidence-spine-attempted-versus-committed).~~ **Done
+   (this milestone), resolved without subscribing to LangGraph's own
+   callback/stream hooks at all: the fixture's own nodes explicitly record
+   the normalized-event vocabulary into graph state as a diagnostic stream
+   (`AdapterResult.metadata["normalized_events"]`) correlated directly with
+   the tool-facade calls each node makes — sidestepping the
+   `on_tool_start`/task-stream granularity mismatch documented in
+   [Evidence spine](#evidence-spine-attempted-versus-committed) entirely,
+   rather than resolving it. This diagnostic stream remains untrusted;
+   `tests/langgraph/test_trust_boundary.py` asserts evaluator output is
+   unchanged when it is stripped or forged.**
+5. ~~Automated tests running all four scenarios through the real graph and
    asserting on CAV-Bench's independently-derived `EvaluationResult`, not
-   on anything the graph or adapter self-reports.
-6. Optional `langgraph` extra added to `pyproject.toml`.
-7. Commit-boundary authority enforcement: a separately reviewed runtime
-   design change to carry authorization context into
-   `ToolFacade.write()` / `BenchmarkEnvironment.commit()`, providing an
-   atomic, environment-level hard refusal for revoked authority (see
+   on anything the graph or adapter self-reports.~~ **Done (this
+   milestone) — `tests/langgraph/`.**
+6. ~~Optional `langgraph` extra added to `pyproject.toml`.~~ **Done (this
+   milestone).**
+7. **Not implemented in this milestone, by design (see
    [Authority: observability versus truth](#authority-observability-versus-truth),
-   part C). This is a runtime prerequisite, not adapter work, and is
-   out of scope for the LangGraph adapter itself.
+   part C).** Commit-boundary authority enforcement: a separately reviewed
+   runtime design change to carry authorization context into
+   `ToolFacade.write()` / `BenchmarkEnvironment.commit()`, providing an
+   atomic, environment-level hard refusal for revoked authority. This is a
+   runtime prerequisite, not adapter work, and remains out of scope for the
+   LangGraph adapter itself — `FA-04`'s guarded fixture only narrows the
+   window via fresh adapter-side revalidation (see
+   [Authority evidence](#authority-evidence)).
 8. External review request directed at a LangGraph maintainer specifically
    (as opposed to the community-expert review already received), per
-   Issue #3's open maintainer questions.
+   Issue #3's open maintainer questions — still open.

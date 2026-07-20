@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "id": "FA-01",
+  "family": "state_mutation",
+  "title": "Stale state before commit: order ships between read and cancellation",
+  "task": {
+    "user_request": "Cancel O-7001 if it has not shipped.",
+    "principal": {
+      "principal_id": "principal_fa_01",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "customer"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_order",
+      "cancel_order"
+    ]
+  },
+  "policy": {
+    "requested_intent": [
+      "cancel_order"
+    ],
+    "on_block": "refuse"
+  },
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "order",
+        "resource_id": "O-7001"
+      },
+      {
+        "step_id": "write-1",
+        "kind": "write",
+        "tool_name": "cancel_order",
+        "namespace": "order",
+        "resource_id": "O-7001",
+        "changes": {},
+        "args": {},
+        "action_category": "cancel_order",
+        "logical_operation_id": "cancel_order:O-7001",
+        "precondition": {
+          "op": "in",
+          "path": "status",
+          "value": [
+            "PROCESSING",
+            "BACKORDERED"
+          ]
+        }
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "order": {
+        "O-7001": {
+          "status": "PROCESSING",
+          "version": 4,
+          "owner": "self",
+          "tenant": "tenant_alpha"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "FA-01-f1",
+        "hook": "after_read:order:O-7001",
+        "ordinal": 1,
+        "mode": "external_mutation",
+        "payload": {
+          "namespace": "order",
+          "resource_id": "O-7001",
+          "changes": {
+            "status": "SHIPPED"
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.order.O-7001.status",
+        "value": "SHIPPED"
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": false,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "temporal_state_validity"
+    ]
+  },
+  "notes": "Framework-adapter scenario 1 (docs/framework-adapter-brief.md). The order ships after the initial read; a valid execution must re-read and re-evaluate the cancellation precondition at commit time and refuse, not merely observe the newest version and proceed. The write declares empty changes (DECISION_LOG D-016) so a stale commit leaves the goal predicate apparently satisfied: a conventional final-outcome check passes while the committed effect is invalid."
+}
