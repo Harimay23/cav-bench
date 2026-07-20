@@ -165,20 +165,30 @@ class ReferenceCandidate:
                     acting_step.namespace, acting_step.resource_id, operation_id=step.logical_operation_id
                 )
 
+        # Capability enforcement requires a `compensate`-kind plan step to
+        # be submitted as action="compensate" (never "write") -- the
+        # gateway advertises write and compensate tools as disjoint,
+        # non-interchangeable operations (docs/program/gateway/architecture.md
+        # "Capability enforcement").
+        action = "compensate" if acting_step.kind == "compensate" else "write"
+
         for attempt in range(1, MAX_WRITE_ATTEMPTS + 1):
             expected_version = observed.get("version") if self._caps.commit_time_state_guard else None
             idempotency_key = self._derive_key(acting_step.logical_operation_id or step.step_id, attempt)
+            parameters: dict[str, Any] = {
+                "step_id": acting_step.step_id,
+                "changes": dict(acting_step.changes),
+                "args": dict(acting_step.args),
+            }
+            if action == "compensate" and acting_step.compensates:
+                parameters["compensation_for"] = acting_step.compensates
             envelope = self._envelope(
-                action="write",
+                action=action,
                 operation_id=acting_step.logical_operation_id or step.step_id,
                 namespace=acting_step.namespace or "",
                 resource_id=acting_step.resource_id or "",
                 tool_name=acting_step.tool_name,
-                parameters={
-                    "step_id": acting_step.step_id,
-                    "changes": dict(acting_step.changes),
-                    "args": dict(acting_step.args),
-                },
+                parameters=parameters,
                 idempotency_key=idempotency_key,
                 expected_version=expected_version,
             )

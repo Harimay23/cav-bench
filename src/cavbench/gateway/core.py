@@ -15,10 +15,20 @@ Implements the approved topology from
 Transport frontends (``cavbench.gateway.rest``) are thin: they only
 translate wire bytes into a dict, call :meth:`GatewaySession.handle`, and
 translate the returned outcome back into wire bytes. All protocol-neutral
-behavior -- envelope validation, authentication, the 1:1
-request-to-``ToolFacade`` mapping, response normalization, redaction,
+behavior -- envelope validation, authentication, capability enforcement,
+the request-to-``ToolFacade`` mapping, response normalization, redaction,
 session logging, capability advertisement, and final-report intake -- lives
 here, once.
+
+**The request-to-attempt invariant:** every *accepted tool-operation*
+request (``read``, ``write``, ``compensate``, ``status_check``,
+``escalate``, ``clarify``) maps to exactly one ``ToolFacade`` invocation.
+Final-report submission (``report``) is an accepted *non-tool* request and
+maps to zero ``ToolFacade`` invocations by design -- it only sets the
+input to a later :meth:`GatewaySession.finalize` call. A request rejected
+at the gateway level (malformed envelope, authentication failure, unknown
+action, or a capability violation) is not "accepted" in this sense and
+therefore also maps to zero ``ToolFacade`` invocations.
 """
 
 from __future__ import annotations
@@ -40,6 +50,7 @@ from cavbench.gateway.envelope import (
 )
 from cavbench.gateway.errors import (
     AuthenticationError,
+    CapabilityViolationError,
     EnvelopeError,
     UnknownOperationError,
 )
@@ -161,15 +172,99 @@ class GatewaySession:
             "operations": operations,
         }
 
-    # -- request handling: the 1:1 mapping boundary ------------------------
+    # -- capability enforcement (review follow-up: scenario-visible allowlist,
+    # enforced before any ToolFacade call, never derived from the oracle) ---
+
+    def _write_operations(self) -> dict[str, str]:
+        """tool_name -> namespace, for every plan step advertised as a
+        `write` operation by `capabilities()`."""
+        return {
+            step.tool_name: step.namespace or ""
+            for step in self.scenario.view.plan.steps
+            if step.kind == "write" and step.tool_name
+        }
+
+    def _compensate_operations(self) -> dict[str, str]:
+        """tool_name -> namespace, for every plan step advertised as a
+        `compensate` operation by `capabilities()`. Disjoint from
+        `_write_operations()` by construction (a plan step has exactly one
+        `kind`) -- a tool advertised as one can never also satisfy the
+        other, which is what makes write/compensate non-interchangeable."""
+        return {
+            step.tool_name: step.namespace or ""
+            for step in self.scenario.view.plan.steps
+            if step.kind == "compensate" and step.tool_name
+        }
+
+    def _readable_namespaces(self) -> set[str]:
+        """Every namespace referenced anywhere in the scenario's
+        adapter-visible plan -- a well-behaved candidate reads a resource
+        before writing to it (as the reference candidate and every
+        baseline profile do), so a namespace is scenario-visible for
+        reading if any plan step (read, write, or compensate) touches it."""
+        return {step.namespace for step in self.scenario.view.plan.steps if step.namespace}
+
+    def _check_capability(self, envelope: RequestEnvelope) -> None:
+        """Verify the requested operation is actually advertised by
+        `capabilities()` for this scenario, before any `ToolFacade` call.
+        `status_check`/`escalate`/`clarify` are session/case-level
+        facilities every scenario advertises unconditionally (see
+        `capabilities()`), so they carry no additional restriction here."""
+        if envelope.action == ACTION_READ:
+            self._check_read_capability(str(envelope.resource["namespace"]))
+        elif envelope.action in (ACTION_WRITE, ACTION_COMPENSATE):
+            self._check_write_capability(
+                action=envelope.action,
+                tool_name=str(envelope.resource.get("tool_name", "")),
+                namespace=str(envelope.resource["namespace"]),
+            )
+
+    def _check_read_capability(self, namespace: str) -> None:
+        if namespace not in self._readable_namespaces():
+            raise CapabilityViolationError(
+                f"namespace {namespace!r} is not scenario-visible for this session "
+                f"(advertised namespaces: {sorted(self._readable_namespaces())!r})"
+            )
+
+    def _check_write_capability(self, *, action: str, tool_name: str, namespace: str) -> None:
+        if action == ACTION_WRITE:
+            advertised = self._write_operations()
+            other = self._compensate_operations()
+            kind_label = "write"
+        else:
+            advertised = self._compensate_operations()
+            other = self._write_operations()
+            kind_label = "compensate"
+
+        if tool_name not in advertised:
+            if tool_name in other:
+                raise CapabilityViolationError(
+                    f"tool {tool_name!r} is advertised as a "
+                    f"{'compensate' if kind_label == 'write' else 'write'} operation, not {kind_label!r} "
+                    f"-- write and compensate operations are not interchangeable"
+                )
+            raise CapabilityViolationError(
+                f"tool {tool_name!r} is not an advertised {kind_label!r} operation for this scenario "
+                f"(advertised {kind_label} tools: {sorted(advertised)!r})"
+            )
+        if advertised[tool_name] != namespace:
+            raise CapabilityViolationError(
+                f"tool {tool_name!r} is advertised under namespace {advertised[tool_name]!r}, "
+                f"not {namespace!r}"
+            )
+
+    # -- request handling: the request-to-attempt boundary ------------------
 
     def handle(self, raw: Mapping[str, JSONValue]) -> GatewayOutcome:
         """Handle exactly one wire request.
 
-        A well-formed, authenticated request maps to *exactly one*
-        ``ToolFacade`` invocation (or, for `report`, zero -- see module
-        docstring). A malformed or unauthenticated request is rejected here
-        without ever reaching ``ToolFacade``.
+        Every accepted tool-operation request maps to exactly one
+        ``ToolFacade`` invocation. Final-report submission is an accepted
+        non-tool request and maps to zero ``ToolFacade`` invocations by
+        design (see module docstring). A malformed envelope, an
+        authentication failure, an unknown action, or a capability
+        violation (an unadvertised or mismatched tool/namespace/action) is
+        rejected here without ever reaching ``ToolFacade``.
         """
         raw_dict = dict(raw) if isinstance(raw, Mapping) else {}
         correlation_id = raw_dict.get("correlation_id") if isinstance(raw_dict.get("correlation_id"), str) else None
@@ -235,6 +330,20 @@ class GatewaySession:
             )
             self._log_request(envelope, raw_dict, response, tool_facade_call=False)
             return GatewayOutcome(accepted=True, response=response, http_hint="ok")
+
+        try:
+            self._check_capability(envelope)
+        except CapabilityViolationError as exc:
+            self.log.record_rejection(
+                reason="capability_violation", correlation_id=envelope.correlation_id, raw_envelope=raw_dict
+            )
+            return GatewayOutcome(
+                accepted=False,
+                rejection=GatewayRejection(
+                    reason="capability_violation", detail=str(exc), correlation_id=envelope.correlation_id
+                ),
+                http_hint="not_found",
+            )
 
         result: ToolResult
         status: str

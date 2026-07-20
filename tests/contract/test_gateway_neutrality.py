@@ -182,8 +182,13 @@ def test_blind_retry_with_fresh_identity_produces_a_duplicate_effect() -> None:
 
 
 def test_compensate_action_maps_to_tool_facade_write_with_compensation_for() -> None:
-    scenario = PACK.get("ER-05")
-    comp_step = next(s for s in scenario.view.plan.steps if s.step_id == "cancel-1")
+    # ER-04's plan has a genuine `kind == "compensate"` step (`release-1`,
+    # tool `release_inventory`, compensating `reserve-1`) -- the only
+    # scenario in this suite with a real compensate-kind step, which is
+    # what capability enforcement now requires the `compensate` action to
+    # target.
+    scenario = PACK.get("ER-04")
+    comp_step = next(s for s in scenario.view.plan.steps if s.kind == "compensate")
     session = GatewaySession.start(scenario, seed=0, run_id="neutrality-9")
     envelope = _envelope(
         session,
@@ -194,13 +199,13 @@ def test_compensate_action_maps_to_tool_facade_write_with_compensation_for() -> 
             "tool_name": comp_step.tool_name,
         },
         idempotency_key="idem-comp",
-        parameters={"compensation_for": "refund-1"},
+        parameters={"compensation_for": comp_step.compensates},
     )
     outcome = session.handle(envelope)
     assert outcome.accepted
     assert session.log.tool_facade_call_count() == 1
     effects = session.environment.ledger.as_dicts()
-    assert effects[0]["compensation_for"] == "refund-1"
+    assert effects[0]["compensation_for"] == comp_step.compensates
 
 
 def test_escalate_action_maps_to_tool_facade_escalate() -> None:
