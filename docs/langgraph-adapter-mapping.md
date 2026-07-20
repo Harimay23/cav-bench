@@ -188,13 +188,21 @@ final compare-and-set guard** that actually closes it — this is
 (`docs/architecture.md`'s commit path), not anything the revalidation
 node's own logic can substitute for.
 
-The fixture implementing this scenario must therefore inject **two**
-mutations, not one: the original mutation the current single-mutation
-fixture already covers, and a second mutation timed to land **after
-semantic revalidation but before commit**. Expected behavior for that
-second, later mutation: `session.tools.write(...)` returns `CONFLICT`, and
-no invalid effect is committed — proving the atomic guard, not the
-revalidation node's own reasoning, is what ultimately protects the commit.
+The implementation must cover **two deterministic stale-state fixture
+variants**, not one mutation injected mid-run:
+
+1. **State changes before semantic revalidation** — testing whether the
+   semantic re-check blocks an invalid action.
+2. **State changes after semantic revalidation but before
+   `session.tools.write(...)`** — testing whether the atomic
+   `expected_version` compare-and-set guard rejects the stale commit.
+
+For the second variant, the expected outcome must be:
+
+- `session.tools.write(...)` returns `CONFLICT`;
+- no invalid effect is committed;
+- the test demonstrates that the atomic write-boundary guard, not
+  graph-node ordering, is the load-bearing protection.
 
 ## Stable operation identity and reconciliation
 
@@ -328,8 +336,8 @@ clarifications:
    `ExecutionAdapter` protocol shape, raising a clear development-stage
    error on `run()`; no real graph.
 2. Reference fixture graph implementing the four scenarios above with
-   `durability="sync"` and fine-grained nodes, including the two-mutation
-   stale-state fixture from
+   `durability="sync"` and fine-grained nodes, including the two
+   stale-state timing variants from
    [Stale-state TOCTOU protection](#stale-state-toctou-protection) and the
    checkpoint-timed lost-response fixture from
    [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation).
