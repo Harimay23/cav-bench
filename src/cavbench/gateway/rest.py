@@ -29,6 +29,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from cavbench.gateway.bind import validate_loopback_host
 from cavbench.gateway.core import GatewaySession
 from cavbench.gateway.envelope import ENVELOPE_VERSION
 
@@ -134,9 +135,19 @@ def make_handler(session: GatewaySession) -> type[BaseHTTPRequestHandler]:
 
 
 class GatewayRestServer:
-    """A loopback-only REST server fronting exactly one `GatewaySession`."""
+    """A loopback-only REST server fronting exactly one `GatewaySession`.
+
+    The `host` is validated by `cavbench.gateway.bind.validate_loopback_host`
+    before any socket is opened: only addresses that resolve entirely to
+    loopback interfaces are accepted (e.g. `127.0.0.1`, `::1`,
+    `localhost`). `0.0.0.0`, `::`, LAN/public addresses, and hostnames that
+    resolve to any non-loopback address are rejected with
+    `NonLoopbackBindError`. Remote-candidate (non-loopback) mode is out of
+    scope for this milestone.
+    """
 
     def __init__(self, session: GatewaySession, *, host: str = "127.0.0.1", port: int = 0) -> None:
+        validate_loopback_host(host)
         self._session = session
         handler = make_handler(session)
         self._httpd = ThreadingHTTPServer((host, port), handler)

@@ -33,6 +33,18 @@ class UnknownSessionError(GatewayError):
     """The request does not correlate to any active gateway session."""
 
 
+class NonLoopbackBindError(GatewayError):
+    """A REST server bind address does not resolve entirely to loopback
+    interfaces (GPI-FR / design "Non-functional requirements": benchmark
+    mode is loopback-only). Raised before binding a socket, never after."""
+
+
+class CapabilityViolationError(GatewayError):
+    """A candidate request targets an operation, tool, namespace, or
+    resource shape that `GatewaySession.capabilities()` did not advertise
+    for the current scenario. Raised before any `ToolFacade` call."""
+
+
 class MissingExtraError(GatewayError, ImportError):
     """An optional gateway dependency required for a feature is not installed.
 
