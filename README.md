@@ -128,6 +128,7 @@ The adapter and scenario-pack boundaries are stable extension points; neither re
 - [`docs/adapter-authoring.md`](docs/adapter-authoring.md) — the adapter protocol
 - [`docs/reproducibility.md`](docs/reproducibility.md) — exact reproduction commands and expected output
 - [`docs/citation.md`](docs/citation.md) — which DOI to cite and when, APA/BibTeX, future-release DOI handling
+- [`docs/design/future-workstreams-index.md`](docs/design/future-workstreams-index.md) — designs for future validation, integration, and release workstreams, with program execution-control documents and diagrams; three designs have recorded human design approvals ([`docs/program/approvals/`](docs/program/approvals/README.md)), none are implemented
 - [`DECISION_LOG.md`](DECISION_LOG.md) — locked design decisions, including everything changed during the v0.3 → v1.0 hardening pass
 
 ## Limitations

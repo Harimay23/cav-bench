@@ -6,15 +6,19 @@ maps its terminal state to an (untrusted) ``AdapterResult``. See
 vocabulary, the four `framework-v1` scenario flows, stable identifier
 derivation, and synchronous checkpoint durability.
 
-Trust boundary (unchanged from every other adapter -- see
-``cavbench.adapters.protocol`` and ``docs/architecture.md``): CAV-Bench's
-own tool facade (``AdapterSession.tools``) is the only authoritative source
-of commit truth. LangGraph's own runtime state -- checkpoints, node
-outputs, retry counts -- is only ever used to decide *how* to call the tool
+Adapter-visible trust boundary (unchanged from every other adapter -- see
+``cavbench.adapters.protocol`` and ``docs/architecture.md``):
+``AdapterSession.tools`` is the adapter's only execution path into the
+benchmark environment. Authoritative attempt and commit truth is owned by
+``BenchmarkEnvironment`` and recorded in the canonical trace and
+side-effect ledger -- the tool facade itself records nothing; it delegates
+and relays results. LangGraph runtime state -- checkpoints, node outputs,
+retry counts -- remains untrusted ordering, retry, and resume context only:
+it may only ever be used by this adapter to decide *how* to call the tool
 facade (e.g. deriving a stable idempotency key from checkpointed
-thread/node identity). It is never trusted as evidence that an effect
-validly committed, and ``DeterministicEvaluator`` never sees it: everything
-this adapter returns lands in the trace's untrusted ``adapter_report``.
+thread/node identity), never as evidence that an effect validly committed.
+``DeterministicEvaluator`` never sees it: everything this adapter returns
+lands in the trace's untrusted ``adapter_report``.
 
 LangGraph is an optional dependency: importing this module, and importing
 ``cavbench`` generally, never requires LangGraph to be installed. This
@@ -24,6 +28,7 @@ inside ``run()``. Install it with ``pip install "cav-bench[langgraph]"``.
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -46,10 +51,18 @@ def _ensure_langgraph_installed() -> None:
     is what keeps LangGraph an optional dependency of CAV-Bench. Raises a
     clear, specific invocation-time error rather than letting a bare
     ``ModuleNotFoundError`` surface with no context.
+
+    Only a ``ModuleNotFoundError`` for ``langgraph`` itself is treated as
+    "not installed" -- a ``ModuleNotFoundError`` raised from *inside*
+    langgraph (e.g. one of its own missing dependencies) is a different
+    failure mode and must propagate unchanged rather than being misreported
+    as "langgraph is not installed".
     """
     try:
-        import langgraph  # noqa: F401
-    except ImportError as exc:
+        importlib.import_module("langgraph")
+    except ModuleNotFoundError as exc:
+        if exc.name != "langgraph":
+            raise
         raise ImportError(
             "LangGraphAdapter requires the optional 'langgraph' package, which "
             "is not installed and is not a core CAV-Bench dependency. Install "
