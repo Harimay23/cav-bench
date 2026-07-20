@@ -40,6 +40,14 @@ reporting = ["pandas>=2", "matplotlib>=3"]
 # durability= invoke argument used by the adapter; both ends of the range
 # are exercised in tests (docs/langgraph-adapter-mapping.md).
 langgraph = ["langgraph>=0.6,<2"]
+# The M-GPI-1 REST protocol gateway frontend is standard-library-only
+# (http.server) -- see docs/design/generic-protocol-integration.md open
+# question 4 and DECISION_LOG.md D-009/D-021. This extra is empty today,
+# reserving the `cav-bench[rest]` install spelling documented for the
+# gateway (docs/program/gateway/architecture.md) and matching the isolation
+# pattern the `reporting` extra already establishes: `cavbench.gateway` is
+# never imported by importing plain `cavbench`.
+rest = []
 dev = [
   "pytest>=8",
   "pytest-cov>=5",
@@ -62,6 +70,7 @@ packages = ["src/cavbench"]
 include = [
   "/src",
   "/tests",
+  "/examples",
   "/README.md",
   "/LICENSE",
   "/CHANGELOG.md",
@@ -70,7 +79,7 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 120

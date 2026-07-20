@@ -70,10 +70,68 @@ jobs:
         with:
           name: dist
           path: dist/
-      - run: pip install dist/*.whl
+      - run: pip install "$(ls dist/*.whl)[rest]"
       - run: cavbench doctor
       - run: cavbench validate --pack core-v1
       - run: cavbench ablate --output runs/ci-ablation
+      - name: Gateway smoke test (M-GPI-1) against the built wheel
+        run: |
+          python -c "
+          import sys
+          import cavbench
+          assert 'cavbench.gateway' not in sys.modules
+          from cavbench.gateway.core import GatewaySession
+          from cavbench.gateway.rest import GatewayRestServer
+          from cavbench.scenarios.loader import load_builtin_pack
+          scenario = load_builtin_pack('core-v1').get('HP-01')
+          session = GatewaySession.start(scenario, seed=0, run_id='wheel-smoke')
+          with GatewayRestServer(session) as server:
+              print('gateway REST smoke OK', server.base_url)
+          print('WHEEL GATEWAY SMOKE OK')
+          "
+
+  # M-GPI-1: shared gateway core + REST frontend + deterministic reference
+  # candidate, loopback-only. See docs/program/gateway/architecture.md.
+  gateway-core-installs-without-extras:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Core imports with no protocol extras present (GPI-FR-013)
+        run: |
+          python -c "
+          import sys
+          import cavbench
+          assert 'cavbench.gateway' not in sys.modules
+          print('OK: core import does not pull in cavbench.gateway')
+          "
+
+  gateway-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,rest]"
+      - name: Reference-candidate example, guarded and flawed, both hazard directions
+        run: |
+          python examples/gateway_rest_demo.py --scenario ST-01 --mode guarded
+          python examples/gateway_rest_demo.py --scenario ST-01 --mode flawed
+      - name: Double-run determinism check (loopback-only, artifact-hash comparison)
+        run: |
+          python examples/gateway_rest_demo.py --scenario ER-04 --mode guarded > run1.json
+          python examples/gateway_rest_demo.py --scenario ER-04 --mode guarded > run2.json
+          diff run1.json run2.json && echo "OK: byte-identical across two runs"
+      - name: Gateway-specific test suite
+        run: |
+          pytest -q tests/unit/test_gateway_envelope.py tests/unit/test_gateway_rest.py \
+            tests/unit/test_gateway_extras_isolation.py tests/contract/test_gateway_neutrality.py \
+            tests/contract/test_gateway_forged_report.py tests/integration/test_gateway_hazards.py \
+            tests/integration/test_gateway_determinism.py
 
   # Optional-integration job: the `langgraph` extra is never required to
   # import cavbench or run the core benchmark (see the `test` job above,

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cav-bench/schemas/gateway/envelope-1.0.json",
+  "title": "CAV-Bench generic protocol gateway request envelope",
+  "description": "Common, transport-neutral request envelope (M-GPI-1). See docs/design/generic-protocol-integration.md and docs/program/gateway/envelope.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "envelope_version",
+    "session_token",
+    "operation_id",
+    "correlation_id",
+    "actor_id",
+    "action",
+    "resource"
+  ],
+  "properties": {
+    "envelope_version": { "type": "string" },
+    "session_token": { "type": "string", "minLength": 1 },
+    "operation_id": { "type": "string", "minLength": 1 },
+    "idempotency_key": { "type": ["string", "null"] },
+    "correlation_id": { "type": "string", "minLength": 1 },
+    "actor_id": { "type": "string", "minLength": 1 },
+    "action": { "type": "string", "minLength": 1 },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "resource_id"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "resource_id": { "type": "string", "minLength": 1 },
+        "tool_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "parameters": { "type": "object" },
+    "expected_version": { "type": ["integer", "null"] }
+  }
+}
