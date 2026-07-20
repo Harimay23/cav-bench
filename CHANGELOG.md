@@ -8,6 +8,48 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ## [Unreleased]
 
+### Added
+
+- **M-GPI-1: generic protocol gateway core with a REST frontend**
+  (`cavbench.gateway`), implementing
+  `docs/design/generic-protocol-integration.md` under
+  `docs/program/approvals/M-GPI-1.md`. A benchmark-owned protocol gateway
+  lets a REST-speaking candidate agent or service be evaluated without
+  writing a Python `ExecutionAdapter`: the candidate is the protocol
+  client; the gateway is the protocol server; `ToolFacade` and
+  `BenchmarkEnvironment` remain the sole effect executor and sole commit
+  authority, unchanged. One well-formed, authenticated candidate request
+  maps to exactly one `ToolFacade` invocation; a malformed or
+  unauthenticated request creates zero benchmark attempts. Adds: the
+  common protocol envelope (`cavbench.gateway.envelope`, schema at
+  `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
+  neutral gateway core (`cavbench.gateway.core`); redaction and a
+  redacted session log (`cavbench.gateway.redaction`,
+  `cavbench.gateway.session_log`); a standard-library-only REST frontend
+  (`cavbench.gateway.rest`, no new runtime dependency); a deterministic
+  reference candidate client and REST client
+  (`examples/reference_candidate/`, a scripted test fixture, not a
+  production client library) exercising the four canonical hazard
+  patterns (stale state before commit, ambiguous acknowledgement and
+  retry, partial execution and recovery, authority change before commit)
+  in guarded and flawed configurations; a runnable local example
+  (`examples/gateway_rest_demo.py`); gateway documentation under
+  `docs/program/gateway/` (architecture, envelope reference, REST
+  mapping, candidate integration guide with limitations/non-claims); new
+  CI jobs `gateway-core-installs-without-extras` and `gateway-example`
+  (loopback-only, double-run determinism check), plus a REST-extra
+  gateway smoke test folded into `wheel-smoke-test`; a `rest` optional
+  extra (currently empty — the REST frontend needs no dependency beyond
+  core). `cavbench.gateway` is never imported by importing plain
+  `cavbench` (extras isolation, matching the existing `reporting`
+  pattern). No evaluator, runtime, scenario-schema, or `core-v1` change;
+  all canonical ablation goldens are byte-identical before and after.
+  MCP transport is explicitly out of scope for this milestone (deferred,
+  see `DECISION_LOG.md` D-020). External technical review of the
+  envelope and REST mapping has not occurred; the gateway is not claimed
+  as externally validated, adopted, or production-ready. Tracked by
+  [issue #11](https://github.com/Harimay23/cav-bench/issues/11).
+
 ### Documentation
 
 - Recorded human design approvals for three future-workstream milestones:
