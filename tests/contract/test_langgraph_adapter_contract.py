@@ -11,7 +11,6 @@ a clear invocation-time error, and the optional extra is actually declared.
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import sys
 import tomllib
@@ -25,7 +24,6 @@ from cavbench.runtime.session import AdapterSession
 from cavbench.runtime.tools import ToolFacade
 from cavbench.scenarios.loader import load_builtin_pack
 
-LANGGRAPH_INSTALLED = importlib.util.find_spec("langgraph") is not None
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -56,23 +54,74 @@ def test_langgraph_adapter_satisfies_the_execution_adapter_protocol() -> None:
     assert isinstance(adapter.version, str) and adapter.version
 
 
-@pytest.mark.skipif(LANGGRAPH_INSTALLED, reason="only meaningful when the optional extra is absent")
-def test_missing_langgraph_raises_a_clear_invocation_time_error() -> None:
-    """Constructing the adapter must work without langgraph; invoking it must
-    fail with an error that names the missing optional dependency and how to
-    install it -- not a bare ModuleNotFoundError from deep inside a graph."""
-    from cavbench.adapters.langgraph import LangGraphAdapter
+def test_missing_langgraph_raises_a_clear_invocation_time_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The missing-package path is simulated deterministically, via
+    monkeypatching, rather than depending on whether the real developer or
+    CI environment happens to have langgraph installed -- this test must
+    pass either way. Constructing the adapter must work without langgraph;
+    invoking it must fail with an error that names the missing optional
+    dependency and how to install it -- not a bare ModuleNotFoundError from
+    deep inside a graph."""
+    import cavbench.adapters.langgraph as langgraph_adapter_module
+
+    class _MissingLangGraphImportlib:
+        @staticmethod
+        def import_module(name: str) -> object:
+            assert name == "langgraph"
+            raise ModuleNotFoundError(
+                "No module named 'langgraph'",
+                name="langgraph",
+            )
+
+    monkeypatch.setattr(
+        langgraph_adapter_module,
+        "importlib",
+        _MissingLangGraphImportlib(),
+    )
 
     scenario = load_builtin_pack("framework-v1").get("FA-01")
-    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-missing-dep-test")
+    env = BenchmarkEnvironment(
+        scenario,
+        seed=0,
+        run_id="langgraph-missing-dependency-contract",
+    )
     session = AdapterSession(scenario.view, ToolFacade(env))
 
     with pytest.raises(ImportError) as exc_info:
-        LangGraphAdapter().run(session)
+        langgraph_adapter_module.LangGraphAdapter().run(session)
 
-    message = str(exc_info.value)
+    message = str(exc_info.value).lower()
     assert "langgraph" in message
+    assert "optional" in message
     assert "cav-bench[langgraph]" in message
+    assert "docs/langgraph-adapter-mapping.md" in message
+
+
+def test_ensure_langgraph_installed_reraises_nested_import_failure_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ModuleNotFoundError raised from *inside* langgraph (e.g. one of
+    its own missing dependencies) is a different failure mode than
+    "langgraph itself is not installed", and must propagate unchanged --
+    not be reworded into the optional-dependency message."""
+    import cavbench.adapters.langgraph as langgraph_adapter_module
+
+    class _FakeImportlib:
+        @staticmethod
+        def import_module(name: str) -> object:
+            raise ModuleNotFoundError(
+                "No module named 'some_nested_dependency'", name="some_nested_dependency"
+            )
+
+    monkeypatch.setattr(langgraph_adapter_module, "importlib", _FakeImportlib())
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        langgraph_adapter_module._ensure_langgraph_installed()
+
+    assert exc_info.value.name == "some_nested_dependency"
+    assert "some_nested_dependency" in str(exc_info.value)
 
 
 def test_reference_graph_builder_rejects_unknown_scenarios_before_importing_langgraph() -> None:

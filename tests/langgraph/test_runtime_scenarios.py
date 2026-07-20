@@ -8,12 +8,18 @@ truth -- that is the whole point of the trust boundary.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 
 import pytest
 
+from cavbench.adapters.langgraph import LangGraphAdapter
 from cavbench.adapters.langgraph_reference import NORMALIZED_EVENT_TYPES
-from tests.langgraph.helpers import SCENARIO_IDS, events_of, run_reference_episode
+from cavbench.runtime.environment import BenchmarkEnvironment
+from cavbench.runtime.session import AdapterSession
+from cavbench.runtime.tools import ToolFacade
+from cavbench.scenarios.models import InjectionSpec
+from tests.langgraph.helpers import EVALUATOR, PACK, SCENARIO_IDS, events_of, run_reference_episode
 
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
@@ -38,6 +44,62 @@ def test_stale_state_scenario_blocks_at_commit_time_after_revalidation() -> None
     assert events_of(trace, "side_effect_commit") == []
     assert events_of(trace, "tool_call_attempt") == []
     assert trace.adapter_report["completion_status"] == "success"
+    assert evaluation.dimensions["temporal_state_validity"] == "pass"
+
+
+def test_stale_state_scenario_second_timing_variant_relies_on_the_atomic_guard() -> None:
+    """FA-01's canonical fixture only covers one TOCTOU timing (state changes
+    *before* semantic revalidation, so the revalidation node itself catches
+    it -- see test_stale_state_scenario_blocks_at_commit_time_after_revalidation).
+    docs/langgraph-adapter-mapping.md's Stale-state TOCTOU protection section
+    requires a second, distinct timing: state changes *after* semantic
+    revalidation but *before* the write, which only the atomic
+    `expected_version` compare-and-set guard in `BenchmarkEnvironment.commit()`
+    can catch -- revalidation has already passed by the time this fires.
+    This constructs that second timing directly (same scenario, fault moved
+    from `after_read` to `before_commit`) rather than adding a second
+    `framework-v1` scenario file, since the fixture's write step is the same
+    step either way."""
+    scenario = PACK.get("FA-01")
+    late_mutation = InjectionSpec(
+        fault_id="FA-01-f2-second-timing-variant",
+        hook="before_commit:cancel_order:order:O-7001",
+        ordinal=1,
+        mode="external_mutation",
+        payload={"namespace": "order", "resource_id": "O-7001", "changes": {"status": "SHIPPED"}},
+    )
+    variant_scenario = dataclasses.replace(scenario, injections=(late_mutation,))
+
+    env = BenchmarkEnvironment(variant_scenario, seed=0, run_id="FA-01-second-timing-variant-test")
+    session = AdapterSession(variant_scenario.view, ToolFacade(env))
+    result = LangGraphAdapter(variant="guarded").run(session)
+    trace = env.finalize(
+        {
+            "adapter_name": "langgraph",
+            "adapter_version": "test",
+            "final_message": result.final_message,
+            "completion_status": result.completion_status,
+        }
+    )
+
+    # Revalidation itself must have passed -- the mutation hadn't happened
+    # yet when the commit-time reread ran -- so if anything still blocks the
+    # commit, it is *not* the revalidation node's own precondition check.
+    reads = [e for e in events_of(trace, "tool_read") if "order:O-7001" in e.resource_refs]
+    assert len(reads) == 2, "planning-time read plus the commit-time revalidation reread"
+
+    attempts = events_of(trace, "tool_call_attempt")
+    rejected = events_of(trace, "commit_rejected")
+    commits = events_of(trace, "side_effect_commit")
+    assert len(attempts) == 1, "revalidation passed, so the write must have been attempted this time"
+    assert len(commits) == 0, "no invalid effect may commit"
+    assert len(rejected) == 1
+    assert rejected[0].response_status == "CONFLICT", (
+        "the atomic expected_version compare-and-set guard, not graph-node ordering, "
+        "must be what rejects this -- see Stale-state TOCTOU protection"
+    )
+
+    evaluation = EVALUATOR.evaluate(variant_scenario, trace)
     assert evaluation.dimensions["temporal_state_validity"] == "pass"
 
 

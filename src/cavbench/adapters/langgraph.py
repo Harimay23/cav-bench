@@ -71,6 +71,23 @@ def _ensure_langgraph_installed() -> None:
         ) from exc
 
 
+def _langgraph_version() -> str:
+    """Diagnostic-only version string for ``AdapterResult.metadata``.
+
+    ``langgraph`` does not set a stable module-level ``__version__``
+    attribute (confirmed against the declared floor, 0.6.0), so this reads
+    installed package metadata instead. Never trusted for scoring -- like
+    everything else in ``metadata``, it only ever lands in the trace's
+    untrusted ``adapter_report``.
+    """
+    import importlib.metadata
+
+    try:
+        return importlib.metadata.version("langgraph")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
 class LangGraphAdapter:
     """Implements the ``ExecutionAdapter`` protocol over a LangGraph graph.
 
@@ -102,7 +119,6 @@ class LangGraphAdapter:
 
     def run(self, session: AdapterSession) -> AdapterResult:
         _ensure_langgraph_installed()
-        import langgraph
         from langgraph.checkpoint.memory import InMemorySaver
 
         # A fresh in-memory checkpointer per run keeps repeated runs
@@ -133,7 +149,7 @@ class LangGraphAdapter:
                 # Diagnostic only. Everything here lands in the untrusted
                 # adapter_report; none of it can influence evaluator output.
                 "framework": "langgraph",
-                "langgraph_version": str(getattr(langgraph, "__version__", "unknown")),
+                "langgraph_version": _langgraph_version(),
                 "thread_id": thread_id,
                 "graph_variant": self._variant if self._graph_provider is None else "custom",
                 "normalized_events": list(final_state.get("normalized_events", [])),
