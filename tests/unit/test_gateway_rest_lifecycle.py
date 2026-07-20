@@ -1,6 +1,6 @@
 """`GatewayRestServer` lifecycle tests (M-GPI-1 review follow-up).
 
-Three issues surfaced across review, in order:
+Four issues surfaced across review, in order:
 
 1. `stop()` before `start()` hung, because `HTTPServer.shutdown()` blocks
    waiting for `serve_forever()` to acknowledge a request that never
@@ -13,6 +13,12 @@ Three issues surfaced across review, in order:
    tests exercising it replaced `server._httpd` *after*
    `GatewayRestServer.__init__` had already bound the original server's
    socket, leaking it.
+4. `GatewayRestServer._cleanup()`'s contract is that a `False` return
+   means the thread's termination could not be confirmed, and callers
+   must treat that as a real failure. `start()`'s startup-timeout path
+   honored that contract; ordinary `stop()` did not -- it discarded
+   `_cleanup()`'s return value and reported success even when the server
+   thread was still alive.
 
 `GatewayRestServer` no longer uses `serve_forever()`/`shutdown()` at
 all: `_ManagedHTTPServer.run()` is a loop over the public, documented
@@ -21,7 +27,9 @@ all: `_ManagedHTTPServer.run()` is a loop over the public, documented
 handshake. `start()`'s timeout path and `stop()` both funnel through one
 `GatewayRestServer._cleanup()` that signals cancellation, joins the
 thread with a bounded timeout, and closes the socket exactly once --
-provably, not by assumption.
+provably, not by assumption -- and now `stop()` itself raises
+`ServerLifecycleError` when that join cannot confirm termination, same
+as `start()` already did.
 
 Test-server injection uses the private `_server_class` constructor
 parameter (never a post-construction attribute swap), so a test-double
@@ -510,3 +518,187 @@ def test_no_leaked_server_thread_or_listening_socket_after_stop() -> None:
     assert not thread.is_alive(), "server thread leaked past stop()"
     with pytest.raises(OSError):
         server._httpd.socket.getsockname()  # noqa: SLF001 - fd must actually be closed, not just detached
+
+
+class _SlowShutdownServer(_ManagedHTTPServer):
+    """Confirms startup normally (so `start()` succeeds), then ignores
+    `_cancel` entirely until the test explicitly releases it via
+    `exit_now` -- deterministic, event-driven control over "ignores
+    cancellation for longer than the bounded join timeout" without
+    depending on wall-clock timing to simulate the uncooperative
+    thread."""
+
+    exit_now: threading.Event
+
+    def run(self, *, poll_interval: float = 0.02) -> None:
+        self.timeout = poll_interval
+        self.running_confirmed.set()
+        self.exit_now.wait(timeout=10)
+
+
+def _slow_shutdown_server(exit_now: threading.Event, session: GatewaySession) -> GatewayRestServer:
+    def make_server(*args: Any, **kwargs: Any) -> _SlowShutdownServer:
+        srv = _SlowShutdownServer(*args, **kwargs)
+        srv.exit_now = exit_now
+        return srv
+
+    return GatewayRestServer(session, _server_class=make_server)  # type: ignore[arg-type]
+
+
+def test_stop_raises_when_the_server_thread_does_not_terminate_in_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05)
+
+    exit_now = threading.Event()
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-shutdown-failure")
+    server = _slow_shutdown_server(exit_now, session)
+
+    try:
+        _call_with_timeout(server.start, timeout=2.0)
+        assert server._state == "running"  # noqa: SLF001
+
+        with pytest.raises(ServerLifecycleError, match="did not terminate"):
+            _call_with_timeout(server.stop, timeout=2.0)
+
+        # The thread must be genuinely, verifiably still alive -- not
+        # merely "probably still running" -- at the moment stop() raised.
+        assert server._thread is not None  # noqa: SLF001
+        assert server._thread.is_alive()  # noqa: SLF001
+        assert server._state == "stopped"  # noqa: SLF001
+        with pytest.raises(OSError):
+            server._httpd.socket.getsockname()  # noqa: SLF001 - socket closed regardless
+    finally:
+        exit_now.set()
+        if server._thread is not None:  # noqa: SLF001
+            server._thread.join(timeout=2.0)  # noqa: SLF001
+
+
+def test_stop_retried_after_termination_failure_succeeds_once_the_thread_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05)
+
+    exit_now = threading.Event()
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-shutdown-retry")
+    server = _slow_shutdown_server(exit_now, session)
+
+    try:
+        _call_with_timeout(server.start, timeout=2.0)
+        with pytest.raises(ServerLifecycleError, match="did not terminate"):
+            _call_with_timeout(server.stop, timeout=2.0)
+
+        # Release the thread and let it actually exit before retrying --
+        # this is the "later stop() retries joining an existing
+        # still-live thread, and succeeds once it exits" contract.
+        exit_now.set()
+        server._thread.join(timeout=2.0)  # noqa: SLF001
+        assert not server._thread.is_alive()  # noqa: SLF001
+
+        _call_with_timeout(server.stop, timeout=2.0)  # must now succeed, not raise
+        _call_with_timeout(server.stop, timeout=2.0)  # further calls remain idempotent
+    finally:
+        exit_now.set()
+
+
+def test_server_close_is_never_double_called_across_a_failed_and_retried_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05)
+
+    exit_now = threading.Event()
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-shutdown-close-count")
+    server = _slow_shutdown_server(exit_now, session)
+
+    try:
+        _call_with_timeout(server.start, timeout=2.0)
+
+        close_calls = {"count": 0}
+        original_close = server._httpd.server_close  # noqa: SLF001
+
+        def counting_close() -> None:
+            close_calls["count"] += 1
+            original_close()
+
+        server._httpd.server_close = counting_close  # type: ignore[method-assign]  # noqa: SLF001
+
+        with pytest.raises(ServerLifecycleError):
+            _call_with_timeout(server.stop, timeout=2.0)
+        assert close_calls["count"] == 1  # closed on the failed attempt already
+
+        exit_now.set()
+        server._thread.join(timeout=2.0)  # noqa: SLF001
+        _call_with_timeout(server.stop, timeout=2.0)
+        _call_with_timeout(server.stop, timeout=2.0)
+
+        assert close_calls["count"] == 1  # never closed again on the successful retries
+    finally:
+        exit_now.set()
+
+
+def test_context_manager_exit_surfaces_a_termination_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05)
+
+    exit_now = threading.Event()
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-cm-shutdown-failure")
+    server = _slow_shutdown_server(exit_now, session)
+
+    def run() -> None:
+        with server:
+            pass  # __exit__ calls stop(), which must raise here
+
+    try:
+        with pytest.raises(ServerLifecycleError, match="did not terminate"):
+            _call_with_timeout(run, timeout=2.0)
+    finally:
+        exit_now.set()
+        if server._thread is not None:  # noqa: SLF001
+            server._thread.join(timeout=2.0)  # noqa: SLF001
+
+
+def test_serve_helper_stopper_surfaces_a_termination_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`serve()` takes the same private `_server_class` injection point
+    as `GatewayRestServer.__init__`, so this exercises the exact stopper
+    a real caller of `serve()` would receive and call -- not a
+    reimplementation of its two lines."""
+    import cavbench.gateway.rest as rest_module
+    from cavbench.gateway.rest import serve
+
+    monkeypatch.setattr(rest_module, "_SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05)
+
+    exit_now = threading.Event()
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-serve-helper-failure")
+
+    def make_server(*args: Any, **kwargs: Any) -> _SlowShutdownServer:
+        srv = _SlowShutdownServer(*args, **kwargs)
+        srv.exit_now = exit_now
+        return srv
+
+    stopper = _call_with_timeout(
+        lambda: serve(session, _server_class=make_server),  # type: ignore[arg-type]
+        timeout=2.0,
+    )
+
+    try:
+        with pytest.raises(ServerLifecycleError, match="did not terminate"):
+            _call_with_timeout(stopper, timeout=2.0)
+    finally:
+        exit_now.set()
+        # stopper is GatewayRestServer.stop bound to the server instance;
+        # __self__ gives us that instance back for final cleanup.
+        server = stopper.__self__  # type: ignore[attr-defined]
+        if server._thread is not None:  # noqa: SLF001
+            server._thread.join(timeout=2.0)  # noqa: SLF001
