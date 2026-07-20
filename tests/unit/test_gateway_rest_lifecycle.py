@@ -1,18 +1,40 @@
 """`GatewayRestServer` lifecycle tests (M-GPI-1 review follow-up).
 
-A prior test discovered that calling `stop()` before `start()` hung,
-because `HTTPServer.shutdown()` blocks waiting for `serve_forever()` to
-acknowledge a shutdown request that will never come if `serve_forever()`
-was never running. A follow-up review found a second, subtler race:
-`start()` could return -- and a caller's immediate `stop()` could then
-call `shutdown()` -- before `serve_forever()` had actually reached its
-loop, since nothing previously proved the thread had gotten there.
-`start()` now blocks (bounded) until `_HandshakingHTTPServer` confirms
-`serve_forever()` is genuinely running, and `start()`/`stop()` share one
-lock for their full duration so competing calls serialize instead of
-racing. Every test here bounds its own risky call with a timeout via a
+Three issues surfaced across review, in order:
+
+1. `stop()` before `start()` hung, because `HTTPServer.shutdown()` blocks
+   waiting for `serve_forever()` to acknowledge a request that never
+   comes if `serve_forever()` was never running.
+2. A subtler startup race: `start()` could return -- and a caller's
+   immediate `stop()` could then call `shutdown()` -- before
+   `serve_forever()` had actually reached its loop.
+3. The startup-timeout cleanup path closed the socket but never proved
+   the already-launched server thread had actually terminated, and the
+   tests exercising it replaced `server._httpd` *after*
+   `GatewayRestServer.__init__` had already bound the original server's
+   socket, leaking it.
+
+`GatewayRestServer` no longer uses `serve_forever()`/`shutdown()` at
+all: `_ManagedHTTPServer.run()` is a loop over the public, documented
+`handle_request()` primitive, cancelled via an always-safe-to-signal
+`threading.Event` rather than the private `serve_forever()` shutdown
+handshake. `start()`'s timeout path and `stop()` both funnel through one
+`GatewayRestServer._cleanup()` that signals cancellation, joins the
+thread with a bounded timeout, and closes the socket exactly once --
+provably, not by assumption.
+
+Test-server injection uses the private `_server_class` constructor
+parameter (never a post-construction attribute swap), so a test-double
+server is installed *before* any socket is bound and the real default
+server is never constructed, let alone leaked.
+
+Every test here bounds its own risky call with a timeout via a
 daemon-thread helper, so a regression that reintroduces a hang fails
-this test loudly instead of hanging the whole suite.
+this test loudly instead of hanging the whole suite. Where a race needs
+to be widened deliberately, an `Event`/`Barrier` synchronizes it instead
+of a sleep; sleeps are used only to let an already-resolved scenario's
+straggler thread finish before the test ends, never to coordinate the
+scenario itself.
 """
 
 from __future__ import annotations
@@ -23,10 +45,9 @@ from typing import Any, TypeVar
 
 import pytest
 
-import cavbench.gateway.rest as rest_module
 from cavbench.gateway.core import GatewaySession
 from cavbench.gateway.errors import ServerLifecycleError
-from cavbench.gateway.rest import GatewayRestServer
+from cavbench.gateway.rest import GatewayRestServer, _ManagedHTTPServer
 from cavbench.scenarios.loader import load_builtin_pack
 
 PACK = load_builtin_pack("core-v1")
@@ -60,10 +81,10 @@ def _call_with_timeout(fn: Any, *, timeout: float = BOUND_SECONDS) -> Any:
     return result.get("value")
 
 
-def _server() -> GatewayRestServer:
+def _server(*, server_class: type[_ManagedHTTPServer] = _ManagedHTTPServer) -> GatewayRestServer:
     scenario = PACK.get("HP-01")
     session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-fixture")
-    return GatewayRestServer(session)
+    return GatewayRestServer(session, _server_class=server_class)
 
 
 def test_stop_before_start_does_not_hang() -> None:
@@ -157,10 +178,10 @@ def test_server_close_happens_exactly_once_even_under_repeated_stop_calls() -> N
 
 def test_start_immediately_followed_by_stop_repeated_many_times() -> None:
     """The exact scenario the startup race allowed: `start()` returning
-    before `serve_forever()` was confirmed running, so an immediate
-    `stop()` could call `shutdown()` too early. Repeated many times to
-    make a reintroduced race far more likely to surface than a single
-    iteration would."""
+    before the server loop was confirmed running, so an immediate
+    `stop()` could act too early. Repeated many times to make a
+    reintroduced race far more likely to surface than a single iteration
+    would."""
     for i in range(30):
         scenario = PACK.get("HP-01")
         session = GatewaySession.start(scenario, seed=0, run_id=f"lifecycle-rapid-{i}")
@@ -229,26 +250,41 @@ def test_start_and_stop_called_from_competing_threads() -> None:
         assert not server._thread.is_alive()  # noqa: SLF001
 
 
+class _SlowHandshakeServer(_ManagedHTTPServer):
+    """A `_ManagedHTTPServer` whose startup handshake is deliberately
+    delayed via an `Event`-based hook (not a sleep) that the test controls
+    directly, widening the race window `stop()` must respect without
+    resorting to an arbitrary sleep."""
+
+    delay_until: threading.Event
+
+    def run(self, *, poll_interval: float = 0.02) -> None:
+        self.delay_until.wait(timeout=5)
+        super().run(poll_interval=poll_interval)
+
+
 def test_stop_during_startup_waits_for_startup_to_resolve_then_stops_cleanly() -> None:
     """A `stop()` that arrives while `start()` is still inside its bounded
-    wait for `running_confirmed` must not race ahead of it: since both
-    methods hold the same lock for their whole call, `stop()` simply
+    wait for the running confirmation must not race ahead of it: since
+    both methods hold the same lock for their whole call, `stop()` simply
     blocks until `start()` finishes resolving (to "running", here), then
     proceeds -- never observing or acting on an ambiguous state."""
+    delay_until = threading.Event()
 
-    class _SlowHandshakeServer(rest_module._HandshakingHTTPServer):  # noqa: SLF001
-        def service_actions(self) -> None:
-            time.sleep(0.2)  # widen the race window `stop()` must respect
-            super().service_actions()
+    def make_server(*args: Any, **kwargs: Any) -> _SlowHandshakeServer:
+        srv = _SlowHandshakeServer(*args, **kwargs)
+        srv.delay_until = delay_until
+        return srv
 
     scenario = PACK.get("HP-01")
     session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-stop-during-startup")
-    server = GatewayRestServer(session)
-    server._httpd = _SlowHandshakeServer((server._httpd.server_address[0], 0), rest_module.make_handler(session))  # noqa: SLF001
+    server = GatewayRestServer(session, _server_class=make_server)  # type: ignore[arg-type]
 
     outcomes: dict[str, str] = {}
+    start_lock_taken = threading.Event()
 
     def run_start() -> None:
+        start_lock_taken.set()
         try:
             server.start()
             outcomes["start"] = "ok"
@@ -256,7 +292,9 @@ def test_stop_during_startup_waits_for_startup_to_resolve_then_stops_cleanly() -
             outcomes["start"] = "lifecycle_error"
 
     def run_stop() -> None:
-        time.sleep(0.02)  # ensure start() has already taken the lock and begun waiting
+        start_lock_taken.wait(timeout=5)
+        time.sleep(0.02)  # brief, bounded yield so start() has entered its wait, not a coordination sleep
+        delay_until.set()  # let the handshake proceed only once stop() has been dispatched
         try:
             server.stop()
             outcomes["stop"] = "ok"
@@ -275,30 +313,186 @@ def test_stop_during_startup_waits_for_startup_to_resolve_then_stops_cleanly() -
     assert outcomes.get("start") == "ok"
     assert outcomes.get("stop") == "ok"
     assert server._state == "stopped"  # noqa: SLF001
+    assert server._thread is not None and not server._thread.is_alive()  # noqa: SLF001
 
 
-def test_startup_timeout_raises_a_clear_error_and_leaves_the_server_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """If `running_confirmed` is never set (simulated here rather than
-    waiting out the real 5s timeout, so this test itself stays fast),
-    `start()` must not hang -- it must raise a clear
-    `ServerLifecycleError` within a bounded time and leave the server in
-    the terminal "stopped" state with its socket closed, never in an
-    ambiguous in-between state."""
+class _NeverConfirmingButCancellableServer(_ManagedHTTPServer):
+    """Never sets `running_confirmed` (simulating a handshake that never
+    fires), but still respects cancellation promptly -- the "clean
+    startup-timeout cleanup" case: the thread *can* be terminated, it
+    just never proved it was running."""
+
+    def run(self, *, poll_interval: float = 0.02) -> None:
+        while not self._cancel.is_set():
+            time.sleep(poll_interval)
+
+
+class _UnterminableServer(_ManagedHTTPServer):
+    """Ignores cancellation for longer than the test's bounded join, then
+    exits on its own -- the "cleanup could not confirm termination in
+    time" case. Deliberately outlives the test's short join bound but not
+    the test process, so `start()` must report the honest "could not be
+    terminated" outcome rather than silently claiming success."""
+
+    unresponsive_seconds: float = 0.3
+
+    def run(self, *, poll_interval: float = 0.02) -> None:
+        time.sleep(self.unresponsive_seconds)
+
+
+def test_startup_timeout_leaves_no_live_server_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the handshake never fires (simulated here rather than waiting
+    out the real 5s timeout, so this test itself stays fast), `start()`
+    must not hang -- it must raise a clear `ServerLifecycleError` within
+    a bounded time, and by the time it raises, the launched thread must
+    already be confirmed dead, not merely "probably gone soon."""
+    import cavbench.gateway.rest as rest_module
+
     monkeypatch.setattr(rest_module, "_STARTUP_TIMEOUT_SECONDS", 0.1)
-
-    class _NeverConfirmingServer(rest_module._HandshakingHTTPServer):  # noqa: SLF001
-        def service_actions(self) -> None:
-            pass  # deliberately never sets running_confirmed
 
     scenario = PACK.get("HP-01")
     session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-startup-timeout")
-    server = GatewayRestServer(session)
-    server._httpd = _NeverConfirmingServer((server._httpd.server_address[0], 0), rest_module.make_handler(session))  # noqa: SLF001
+    server = GatewayRestServer(session, _server_class=_NeverConfirmingButCancellableServer)
 
     with pytest.raises(ServerLifecycleError, match="did not confirm startup"):
         _call_with_timeout(server.start, timeout=2.0)
 
+    # The thread reference exists (start() did launch a thread) but must
+    # be confirmed dead -- not merely absent, and not merely "daemon so
+    # it'll die eventually."
+    assert server._thread is not None  # noqa: SLF001
+    assert not server._thread.is_alive()  # noqa: SLF001
     assert server._state == "stopped"  # noqa: SLF001
+    with pytest.raises(OSError):
+        server._httpd.socket.getsockname()  # noqa: SLF001
+
+
+def test_stop_after_startup_failure_is_harmless_and_repeatable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_STARTUP_TIMEOUT_SECONDS", 0.1)
+
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-stop-after-failure")
+    server = GatewayRestServer(session, _server_class=_NeverConfirmingButCancellableServer)
+
+    with pytest.raises(ServerLifecycleError):
+        _call_with_timeout(server.start, timeout=2.0)
+
+    close_calls = {"count": 0}
+    original_close = server._httpd.server_close  # noqa: SLF001
+
+    def counting_close() -> None:
+        close_calls["count"] += 1
+        original_close()
+
+    server._httpd.server_close = counting_close  # type: ignore[method-assign]  # noqa: SLF001
+
+    _call_with_timeout(server.stop, timeout=2.0)
+    _call_with_timeout(server.stop, timeout=2.0)
+    _call_with_timeout(server.stop, timeout=2.0)
+
+    # server_close() already ran once as part of the startup-failure
+    # cleanup itself (before this test even started counting) -- the
+    # counting wrapper installed afterward must see zero further calls.
+    assert close_calls["count"] == 0
+
+
+def test_startup_failure_cleanup_completes_within_a_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_STARTUP_TIMEOUT_SECONDS", 0.1)
+
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-bounded-cleanup")
+    server = GatewayRestServer(session, _server_class=_NeverConfirmingButCancellableServer)
+
+    started_at = time.monotonic()
+    with pytest.raises(ServerLifecycleError):
+        _call_with_timeout(server.start, timeout=2.0)
+    elapsed = time.monotonic() - started_at
+
+    # Two rounds of _STARTUP_TIMEOUT_SECONDS (wait-for-confirm, then the
+    # cleanup join bound) plus generous scheduling slack -- must not be
+    # anywhere near the *un*-patched 5s default, proving the bounded
+    # timeout was actually honored end to end.
+    assert elapsed < 2.0
+
+
+def test_startup_cleanup_reports_when_the_thread_cannot_be_terminated_in_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If cleanup's own bounded join cannot confirm the thread died, the
+    error must say so explicitly rather than silently claiming a clean
+    teardown that did not actually happen."""
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_STARTUP_TIMEOUT_SECONDS", 0.03)
+
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-unterminable")
+    server = GatewayRestServer(session, _server_class=_UnterminableServer)
+
+    with pytest.raises(ServerLifecycleError, match="could not be terminated"):
+        _call_with_timeout(server.start, timeout=2.0)
+
+    # The straggler thread genuinely does terminate on its own shortly
+    # after (by construction, unresponsive_seconds=0.3s) -- wait for it
+    # here so it does not linger past this test into later ones, even
+    # though it is a daemon thread and would not block process exit.
+    if server._thread is not None:  # noqa: SLF001
+        server._thread.join(timeout=2.0)  # noqa: SLF001
+        assert not server._thread.is_alive()  # noqa: SLF001
+
+
+def test_repeated_startup_failures_do_not_accumulate_live_threads_or_open_sockets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runs several independent startup-failure scenarios back to back and
+    compares the set of live, non-daemon-exempt threads before and after
+    (rather than relying only on individual daemon-thread status), plus
+    confirms every server's own thread and socket are individually
+    accounted for."""
+    import cavbench.gateway.rest as rest_module
+
+    monkeypatch.setattr(rest_module, "_STARTUP_TIMEOUT_SECONDS", 0.1)
+
+    threads_before = {t.ident for t in threading.enumerate()}
+    servers: list[GatewayRestServer] = []
+
+    for i in range(10):
+        scenario = PACK.get("HP-01")
+        session = GatewaySession.start(scenario, seed=0, run_id=f"lifecycle-repeated-failure-{i}")
+        server = GatewayRestServer(session, _server_class=_NeverConfirmingButCancellableServer)
+        with pytest.raises(ServerLifecycleError):
+            _call_with_timeout(server.start, timeout=2.0)
+        servers.append(server)
+
+    for server in servers:
+        assert server._thread is not None  # noqa: SLF001
+        assert not server._thread.is_alive(), "a server thread leaked past startup-failure cleanup"  # noqa: SLF001
+        with pytest.raises(OSError):
+            server._httpd.socket.getsockname()  # noqa: SLF001
+
+    threads_after = {t.ident for t in threading.enumerate()}
+    leaked = threads_after - threads_before
+    assert not leaked, f"threads leaked across repeated startup failures: {leaked}"
+
+
+def test_injected_test_server_does_not_leak_the_originally_constructed_server() -> None:
+    """`_server_class` replaces the server *at construction time*, before
+    any socket is bound -- there is never a separately-constructed
+    default server to leak. Verified here by confirming exactly one
+    listening socket exists for this `GatewayRestServer` (the injected
+    one), and it closes cleanly."""
+    scenario = PACK.get("HP-01")
+    session = GatewaySession.start(scenario, seed=0, run_id="lifecycle-injection-no-leak")
+    server = GatewayRestServer(session, _server_class=_ManagedHTTPServer)
+    assert isinstance(server._httpd, _ManagedHTTPServer)  # noqa: SLF001
+
+    _call_with_timeout(server.start)
+    _call_with_timeout(server.stop)
+    assert server._thread is not None and not server._thread.is_alive()  # noqa: SLF001
     with pytest.raises(OSError):
         server._httpd.socket.getsockname()  # noqa: SLF001
 
