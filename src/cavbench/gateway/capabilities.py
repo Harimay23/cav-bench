@@ -23,6 +23,20 @@ scenario pack from declaring the same tool name as both a `write` and a
 `compensate` operation (over different resources, say); what makes them
 non-interchangeable is that enforcement matches on the full descriptor
 tuple, not that the two action buckets can never share a name.
+
+**Implicit read rule:** a scenario's plan rarely declares an explicit
+`read`-kind step for every resource a candidate legitimately needs to
+read (a well-behaved candidate reads a resource before writing or
+compensating it, exactly as the reference candidate and every baseline
+profile do). Rather than advertise a narrower set of reads than
+enforcement actually allows -- the divergence a prior review caught --
+`derive_operations` synthesizes exactly one `read` descriptor for every
+unique `(namespace, resource_id)` referenced by *any* resource-scoped
+step (`read`, `write`, or `compensate`), deduplicated by
+`(action="read", namespace, resource_id)`. There is no separate,
+broader "readable" allowlist anywhere else: the synthesized `read`
+descriptors returned by this function *are* both the advertisement and
+the enforcement boundary for reads.
 """
 
 from __future__ import annotations
@@ -76,37 +90,58 @@ class OperationDescriptor:
 def derive_operations(view: ScenarioView) -> tuple[OperationDescriptor, ...]:
     """Derive every resource-scoped `OperationDescriptor` this scenario
     makes visible, from the adapter-visible plan alone -- never the
-    oracle. Order is the plan's step order; duplicates (by the full
-    descriptor key) are dropped, first occurrence wins."""
-    seen: set[tuple[str, str | None, str, str]] = set()
-    operations: list[OperationDescriptor] = []
+    oracle.
+
+    Two passes over the plan, in step order:
+
+    1. Every unique `(namespace, resource_id)` touched by any
+       resource-scoped step (`read`, `write`, or `compensate`) gets
+       exactly one synthesized `read` descriptor -- see "Implicit read
+       rule" in the module docstring. This is the *only* place read
+       visibility is decided; there is no separate broader allowlist.
+    2. Every `write`/`compensate` step contributes its own descriptor,
+       deduplicated by the full `(action, tool_name, namespace,
+       resource_id)` key -- first occurrence wins.
+
+    Read descriptors are listed first (in first-touched order), followed
+    by write/compensate descriptors in plan order.
+    """
+    read_seen: set[tuple[str, str]] = set()
+    read_operations: list[OperationDescriptor] = []
+    write_seen: set[tuple[str, str | None, str, str]] = set()
+    write_operations: list[OperationDescriptor] = []
+
     for step in view.plan.steps:
         if step.kind not in _RESOURCE_SCOPED_KINDS or not step.namespace or not step.resource_id:
             continue
-        if step.kind == "read":
-            descriptor = OperationDescriptor(action=ACTION_READ, namespace=step.namespace, resource_id=step.resource_id)
-        else:
-            if not step.tool_name:
-                continue
+
+        resource_key = (step.namespace, step.resource_id)
+        if resource_key not in read_seen:
+            read_seen.add(resource_key)
+            read_operations.append(
+                OperationDescriptor(action=ACTION_READ, namespace=step.namespace, resource_id=step.resource_id)
+            )
+
+        if step.kind in (ACTION_WRITE, ACTION_COMPENSATE) and step.tool_name:
             action = ACTION_WRITE if step.kind == "write" else ACTION_COMPENSATE
             descriptor = OperationDescriptor(
                 action=action, namespace=step.namespace, resource_id=step.resource_id, tool_name=step.tool_name
             )
-        key = descriptor.key()
-        if key not in seen:
-            seen.add(key)
-            operations.append(descriptor)
-    return tuple(operations)
+            key = descriptor.key()
+            if key not in write_seen:
+                write_seen.add(key)
+                write_operations.append(descriptor)
+
+    return tuple(read_operations) + tuple(write_operations)
 
 
 def readable_resources(operations: tuple[OperationDescriptor, ...]) -> frozenset[tuple[str, str]]:
-    """Every `(namespace, resource_id)` pair scenario-visible for `read`.
-
-    A well-behaved candidate reads a resource before acting on it (as the
-    reference candidate and every baseline profile do), so a resource is
-    read-visible if *any* operation -- `read`, `write`, or `compensate`
-    -- targets it, not only an explicit `read`-kind plan step."""
-    return frozenset((op.namespace, op.resource_id) for op in operations)
+    """Every `(namespace, resource_id)` pair scenario-visible for `read` --
+    exactly the resources carrying a synthesized `read` descriptor in
+    `operations` (see `derive_operations`' "Implicit read rule"). This is
+    read *enforcement's* boundary, and it is definitionally identical to
+    what is *advertised*, since both come from the same `read` descriptors."""
+    return frozenset((op.namespace, op.resource_id) for op in operations if op.action == ACTION_READ)
 
 
 def operations_by_action_and_tool(

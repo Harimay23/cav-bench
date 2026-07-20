@@ -48,7 +48,9 @@ def test_same_tool_name_under_different_actions_are_distinct_descriptors() -> No
         ]
     )
     ops = derive_operations(view)
-    assert len(ops) == 2
+    # 1 synthesized read (both steps target the same resource) + write + compensate
+    assert len(ops) == 3
+    assert OperationDescriptor("read", "ns", "R-1") in ops
     assert OperationDescriptor("write", "ns", "R-1", "relabel_item") in ops
     assert OperationDescriptor("compensate", "ns", "R-1", "relabel_item") in ops
 
@@ -61,8 +63,11 @@ def test_same_tool_name_under_different_namespaces_are_distinct_descriptors() ->
         ]
     )
     ops = derive_operations(view)
-    assert len(ops) == 2
-    namespaces = {op.namespace for op in ops}
+    # 2 synthesized reads (distinct namespaces) + 2 writes
+    assert len(ops) == 4
+    write_ops = [op for op in ops if op.action == "write"]
+    assert len(write_ops) == 2
+    namespaces = {op.namespace for op in write_ops}
     assert namespaces == {"ns-a", "ns-b"}
 
 
@@ -75,8 +80,10 @@ def test_same_tool_name_under_different_resource_ids_are_distinct_descriptors() 
         ]
     )
     ops = derive_operations(view)
-    assert len(ops) == 3
-    resource_ids = {op.resource_id for op in ops}
+    # 3 synthesized reads + 3 writes
+    assert len(ops) == 6
+    write_ops = [op for op in ops if op.action == "write"]
+    resource_ids = {op.resource_id for op in write_ops}
     assert resource_ids == {"R-1", "R-2", "R-3"}
 
     r2_only = operations_by_action_and_tool(ops, action="write", tool_name="relabel_item")
@@ -96,7 +103,10 @@ def test_deduplication_is_by_full_descriptor_not_by_tool_name_alone() -> None:
         ]
     )
     ops = derive_operations(view)
-    assert len(ops) == 2  # s1/s2 collapse; s3 is distinct
+    # reads: R-1 (from s1/s2, collapsed) + R-2 (from s3) = 2; writes: s1/s2 collapse, s3 distinct = 2
+    assert len(ops) == 4
+    write_ops = [op for op in ops if op.action == "write"]
+    assert len(write_ops) == 2  # s1/s2 collapse; s3 is distinct
 
 
 def test_read_visibility_includes_write_and_compensate_targeted_resources() -> None:
