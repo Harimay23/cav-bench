@@ -117,6 +117,7 @@ cavbench ablate
 The adapter and scenario-pack boundaries are stable extension points; neither requires touching evaluator internals.
 
 - **Add an adapter** (a real LLM agent, an agent framework, a future MCP client): implement `cavbench.adapters.protocol.ExecutionAdapter` — see [`docs/adapter-authoring.md`](docs/adapter-authoring.md) and [`examples/custom_adapter.py`](examples/custom_adapter.py).
+- **Evaluate a REST-speaking candidate** without writing a Python adapter: use the generic protocol gateway (`cavbench.gateway`, REST frontend, loopback-only) — see [`docs/program/gateway/architecture.md`](docs/program/gateway/architecture.md) and [`examples/gateway_rest_demo.py`](examples/gateway_rest_demo.py). Experimental (`M-GPI-1`); external technical review has not occurred — see the doc's limitations section before relying on it.
 - **Add a scenario pack** (a new domain, more coverage): author scenario JSON documents against `scenario-v1.schema.json` — see [`docs/scenario-authoring.md`](docs/scenario-authoring.md) and [`examples/custom_scenario_pack/`](examples/custom_scenario_pack/).
 - **Use CAV-Bench in CI** as a regression gate: `cavbench run --profile <your-adapter> --fail-on-cvsr-below 0.9` exits non-zero when the threshold isn't met — see [`examples/ci_threshold.sh`](examples/ci_threshold.sh).
 
@@ -128,7 +129,7 @@ The adapter and scenario-pack boundaries are stable extension points; neither re
 - [`docs/adapter-authoring.md`](docs/adapter-authoring.md) — the adapter protocol
 - [`docs/reproducibility.md`](docs/reproducibility.md) — exact reproduction commands and expected output
 - [`docs/citation.md`](docs/citation.md) — which DOI to cite and when, APA/BibTeX, future-release DOI handling
-- [`docs/design/future-workstreams-index.md`](docs/design/future-workstreams-index.md) — designs for future validation, integration, and release workstreams, with program execution-control documents and diagrams; three designs have recorded human design approvals ([`docs/program/approvals/`](docs/program/approvals/README.md)), none are implemented
+- [`docs/design/future-workstreams-index.md`](docs/design/future-workstreams-index.md) — designs for future validation, integration, and release workstreams, with program execution-control documents and diagrams; three designs have recorded human design approvals ([`docs/program/approvals/`](docs/program/approvals/README.md)); `M-GPI-1` (generic protocol integration) has an experimental implementation (this PR) — see [`docs/program/gateway/`](docs/program/gateway/architecture.md)
 - [`DECISION_LOG.md`](DECISION_LOG.md) — locked design decisions, including everything changed during the v0.3 → v1.0 hardening pass
 
 ## Limitations

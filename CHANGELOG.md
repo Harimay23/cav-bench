@@ -8,6 +8,123 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ## [Unreleased]
 
+### Added
+
+- **M-GPI-1: generic protocol gateway core with a REST frontend**
+  (`cavbench.gateway`), implementing
+  `docs/design/generic-protocol-integration.md` under
+  `docs/program/approvals/M-GPI-1.md`. A benchmark-owned protocol gateway
+  lets a REST-speaking candidate agent or service be evaluated without
+  writing a Python `ExecutionAdapter`: the candidate is the protocol
+  client; the gateway is the protocol server; `ToolFacade` and
+  `BenchmarkEnvironment` remain the sole effect executor and sole commit
+  authority, unchanged. Every accepted tool-operation request maps to
+  exactly one `ToolFacade` invocation; final-report submission is an
+  accepted non-tool request and maps to zero `ToolFacade` invocations by
+  design; a malformed envelope, an authentication failure, or a
+  **capability violation** creates zero benchmark attempts. Every
+  candidate request is checked, before any `ToolFacade` call, against one
+  canonical scenario-visible capability model
+  (`cavbench.gateway.capabilities.derive_operations`, shared by
+  advertisement and enforcement so the two cannot diverge) at the full
+  `(action, tool_name, namespace, resource_id)` level — write and
+  compensate tools are never interchangeable, and a resource visible for
+  one operation is not automatically visible for another. Read
+  visibility is derived, not separately enforced: `derive_operations`
+  synthesizes exactly one `read` descriptor per unique
+  `(namespace, resource_id)` touched by any resource-scoped step (read,
+  write, or compensate), so read advertisement and read enforcement are
+  definitionally identical — proved generically across several scenarios
+  by `tests/contract/test_gateway_capability_consistency.py`. Capability
+  discovery (`GET /capabilities`) returns an independent deep-copy
+  snapshot of a frozen advertisement and records an independent
+  deep-copy of it in the session log on every call (GPI-FR-009);
+  `capabilities()`, `discover_capabilities()`, and
+  `SessionLogEntry.to_dict()` all return fresh, fully independent
+  copies, so mutating a returned object can never affect a later call, a
+  prior log entry, or the internal canonical model. The session log is
+  genuinely append-only: internal storage is private, the only append
+  paths are `record_request`/`record_rejection`/`record_discovery`, and
+  the public `entries` property and `to_list()` return fresh defensive
+  copies, so a caller can never clear, append to, reorder, or mutate
+  what is actually stored. The REST server is deliberately
+  single-threaded (`http.server.HTTPServer`, never `ThreadingHTTPServer`):
+  every handler shares one mutable `GatewaySession`, so concurrent
+  handling would make commit order, trace order, and log order
+  nondeterministic; requests are now handled one at a time, in full,
+  before the next is accepted -- processing order follows whatever order
+  the underlying TCP connections were accepted in (no gateway-imposed
+  queueing, sorting, or reordering); a reproducible ordered candidate
+  trace requires the candidate itself to send one request at a time and
+  wait for each response. Proven by
+  `tests/contract/test_gateway_rest_concurrency.py` (no overlap, 1:1
+  request-to-`ToolFacade` mapping under concurrent load, monotonic log
+  sequencing in actual processing order, no racing ledger commits,
+  report submission cannot race a consequential operation, deterministic
+  final benchmark state across repeated concurrent runs without claiming
+  a reproducible ordered trace). Server lifecycle
+  (`created -> running -> stopped`) is now deterministic and idempotent.
+  `GatewayRestServer` no longer uses `serve_forever()`/`shutdown()`:
+  `_ManagedHTTPServer.run()` loops over the public `handle_request()`
+  primitive, cancelled via an always-safe-to-signal `threading.Event`
+  rather than `serve_forever()`'s private shutdown handshake. `start()`
+  blocks (bounded) until the loop confirms it is genuinely active before
+  returning, and `start()`/`stop()` share one lock so competing calls
+  from different threads resolve deterministically instead of racing.
+  One internal cleanup routine -- signal cancellation, join the thread
+  with a bounded timeout, close the socket exactly once -- backs both a
+  startup-timeout failure and a normal `stop()`, and proves the thread
+  actually terminated rather than assuming it did; if it cannot confirm
+  termination within the bound, `start()` raises a distinct error naming
+  both failures. `stop()` before `start()` no longer hangs, `start()`
+  while running is a no-op, `start()` after `stop()` (including after a
+  startup failure) raises `ServerLifecycleError`, and
+  `stop()`/`server_close()` are safe to call repeatedly
+  (`tests/unit/test_gateway_rest_lifecycle.py`, including repeated
+  startup-failure runs checked against the process's live-thread set for
+  leaks). `stop()` now honors the same honest-termination contract as the
+  startup-timeout path: it raises `ServerLifecycleError` if the bounded
+  join cannot confirm the server thread actually terminated, rather than
+  discarding that result and reporting success while the thread is still
+  alive; the socket is still closed exactly once, state remains
+  `"stopped"`, and a later `stop()` call safely retries the join,
+  succeeding harmlessly once the thread exits. The same behavior applies
+  to direct `stop()`, the callable `serve()` returns, and context-manager
+  `__exit__` (`tests/unit/test_gateway_rest_lifecycle.py`, using an
+  `Event`-gated test double, never a wall-clock sleep, to simulate an
+  uncooperative thread). Adds: the
+  common protocol envelope (`cavbench.gateway.envelope`, schema at
+  `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
+  neutral gateway core (`cavbench.gateway.core`); the capability model
+  (`cavbench.gateway.capabilities`); loopback-only REST bind validation
+  (`cavbench.gateway.bind`, rejects `0.0.0.0`/`::`/LAN addresses/non-
+  loopback hostnames before a socket opens); redaction and a
+  redacted session log (`cavbench.gateway.redaction`,
+  `cavbench.gateway.session_log`); a standard-library-only REST frontend
+  (`cavbench.gateway.rest`, no new runtime dependency); a deterministic
+  reference candidate client and REST client
+  (`examples/reference_candidate/`, a scripted test fixture, not a
+  production client library) exercising the four canonical hazard
+  patterns (stale state before commit, ambiguous acknowledgement and
+  retry, partial execution and recovery, authority change before commit)
+  in guarded and flawed configurations; a runnable local example
+  (`examples/gateway_rest_demo.py`); gateway documentation under
+  `docs/program/gateway/` (architecture, envelope reference, REST
+  mapping, candidate integration guide with limitations/non-claims); new
+  CI jobs `gateway-core-installs-without-extras` and `gateway-example`
+  (loopback-only, double-run determinism check), plus a REST-extra
+  gateway smoke test folded into `wheel-smoke-test`; a `rest` optional
+  extra (currently empty — the REST frontend needs no dependency beyond
+  core). `cavbench.gateway` is never imported by importing plain
+  `cavbench` (extras isolation, matching the existing `reporting`
+  pattern). No evaluator, runtime, scenario-schema, or `core-v1` change;
+  all canonical ablation goldens are byte-identical before and after.
+  MCP transport is explicitly out of scope for this milestone (deferred,
+  see `DECISION_LOG.md` D-021). External technical review of the
+  envelope and REST mapping has not occurred; the gateway is not claimed
+  as externally validated, adopted, or production-ready. Tracked by
+  [issue #11](https://github.com/Harimay23/cav-bench/issues/11).
+
 ### Documentation
 
 - Added a draft LangGraph adapter mapping, a non-executable

@@ -66,7 +66,7 @@ its own PRs, and must not be modified by executors working this queue.
   `38c5e1e8590e17c2798618c0490db7958d7f739d` — the proposed
   gateway-mediated topology and REST-first transport order are confirmed
   by the record)
-- **issue placeholder:** `ISSUE-TBD-GPI-1`
+- **issue:** [#11 — `[M-GPI-1] Implement generic protocol gateway core with REST frontend`](https://github.com/Harimay23/cav-bench/issues/11)
 - **branch name (proposed):** `feat/generic-protocol-integration`
 - **PR title (proposed):** `feat: add generic protocol integration core with first transport`
 - **dependency milestones:** none in this queue; design approval is now
@@ -74,7 +74,14 @@ its own PRs, and must not be modified by executors working this queue.
   topology and REST-first transport order; a `DECISION_LOG.md` entry at
   implementation time recording both remains required (per `AGENTS.md`
   scope discipline and approval Condition 1).
-- **current status:** `APPROVED_FOR_IMPLEMENTATION`
+- **current status:** `PR_OPEN` (transitioned
+  `APPROVED_FOR_IMPLEMENTATION` → `IMPLEMENTING` → `PR_OPEN` at execution
+  journal `docs/program/journal/execution-journal.jsonl` checkpoints
+  `ckpt-0001`/`ckpt-0002`, branch `feat/generic-protocol-integration`,
+  base `origin/main` `7d55cc9666a403571f048ed3ca50aa309f8a977b`, draft PR
+  [#12](https://github.com/Harimay23/cav-bench/pull/12). Marking the PR
+  ready for review and merging remain human decisions per
+  `gate-state.md`; no further milestone work proceeds from this state.)
 - **allowed actions:** new optional-extra modules for the gateway core
   and first transport frontend; deterministic reference candidate client
   (examples-adjacent); CI example job; documentation; changelog +
@@ -86,14 +93,17 @@ its own PRs, and must not be modified by executors working this queue.
   reconciliation on the candidate's behalf; network egress beyond
   loopback in benchmark mode.
 - **implementation deliverables:** envelope schema + docs; shared
-  gateway core (session binding, 1:1 request-to-ToolFacade mapping,
-  session log); first transport frontend; reference candidate client;
-  candidate-facing mapping documentation; CI example.
+  gateway core (session binding, capability enforcement, the
+  request-to-attempt mapping, session log); first transport frontend;
+  reference candidate client; candidate-facing mapping documentation; CI
+  example.
 - **required tests:** envelope/normalization unit tests; identity
   pass-through (no mutation) tests; redaction tests; adversarial
-  forged-final-report contract test; gateway neutrality tests (exact 1:1
-  request↔attempt correspondence, no unrequested reconciliation or
-  retries); malformed-request tests (no benchmark attempt created);
+  forged-final-report contract test; gateway neutrality tests (every
+  accepted tool-operation request maps to exactly one ToolFacade
+  invocation, final-report submission maps to zero by design, no
+  unrequested reconciliation or retries); malformed-request and
+  capability-violation tests (no benchmark attempt created);
   reference-candidate integration tests over the four hazard patterns in
   guarded and flawed configurations; determinism (double-run hash)
   check; extras-isolation import test; full quality gate.
