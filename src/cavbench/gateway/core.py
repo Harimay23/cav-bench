@@ -38,6 +38,12 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from cavbench.gateway.capabilities import (
+    OperationDescriptor,
+    derive_operations,
+    operations_by_action_and_tool,
+    readable_resources,
+)
 from cavbench.gateway.envelope import (
     ENVELOPE_VERSION,
     STATUS_ACCEPTED,
@@ -120,6 +126,8 @@ class GatewaySession:
     _final_report: dict[str, JSONValue] | None = field(default=None, repr=False)
     _idempotency_by_operation: dict[str, str] = field(default_factory=dict, repr=False)
     _trace: EpisodeTrace | None = field(default=None, repr=False)
+    _operations_cache: tuple[OperationDescriptor, ...] | None = field(default=None, repr=False)
+    _advertisement_cache: dict[str, JSONValue] | None = field(default=None, repr=False)
 
     @classmethod
     def start(cls, scenario: ScenarioDefinition, *, seed: int = 0, run_id: str | None = None) -> GatewaySession:
@@ -139,31 +147,44 @@ class GatewaySession:
 
     # -- capability discovery (GPI-FR-009) --------------------------------
 
+    def _resource_scoped_operations(self) -> tuple[OperationDescriptor, ...]:
+        """The canonical, memoized capability model for this session's
+        scenario -- see `cavbench.gateway.capabilities`. Computed once:
+        the underlying `ScenarioView` is immutable for the session's
+        lifetime, so every call is guaranteed to see the same frozen set
+        of descriptors. Both `capabilities()` (advertisement) and
+        `_check_capability()` (enforcement) read from this single source,
+        so they cannot diverge."""
+        if self._operations_cache is None:
+            self._operations_cache = derive_operations(self.scenario.view)
+        return self._operations_cache
+
     def capabilities(self) -> dict[str, JSONValue]:
-        """Advertise the operations available in this scenario, derived
-        only from the adapter-visible `ScenarioView` -- never the oracle."""
+        """Compute (once) the operations available in this scenario,
+        derived only from the adapter-visible `ScenarioView` -- never the
+        oracle. Pure: does not touch the session log. Use
+        `discover_capabilities()` to advertise *and* log (GPI-FR-009)."""
+        if self._advertisement_cache is not None:
+            return self._advertisement_cache
+
         view = self.scenario.view
         operations: list[dict[str, JSONValue]] = [
-            {"action": ACTION_READ, "description": "Read a resource's current state."},
             {"action": ACTION_STATUS_CHECK, "description": "Reconcile an operation by idempotency_key."},
             {"action": ACTION_ESCALATE, "description": "Escalate the case for manual handling."},
             {"action": ACTION_CLARIFY, "description": "Request clarification."},
             {"action": ACTION_REPORT, "description": "Submit the untrusted final completion report."},
         ]
-        write_kinds = {"write", "compensate"}
-        seen_tools: set[str] = set()
-        for step in view.plan.steps:
-            if step.kind in write_kinds and step.tool_name and step.tool_name not in seen_tools:
-                seen_tools.add(step.tool_name)
-                operations.append(
-                    {
-                        "action": ACTION_COMPENSATE if step.kind == "compensate" else ACTION_WRITE,
-                        "tool_name": step.tool_name,
-                        "namespace": step.namespace,
-                        "description": f"Consequential operation: {step.tool_name}",
-                    }
-                )
-        return {
+        for descriptor in self._resource_scoped_operations():
+            payload = descriptor.to_dict()
+            payload["description"] = (
+                f"Read {descriptor.namespace}:{descriptor.resource_id}."
+                if descriptor.action == ACTION_READ
+                else f"{descriptor.action.capitalize()} operation {descriptor.tool_name!r} "
+                f"on {descriptor.namespace}:{descriptor.resource_id}."
+            )
+            operations.append(payload)
+
+        advertisement = {
             "envelope_version": ENVELOPE_VERSION,
             "session_id": self.session_id,
             "scenario_id": view.id,
@@ -171,38 +192,27 @@ class GatewaySession:
             "toolset": list(view.toolset),
             "operations": operations,
         }
+        self._advertisement_cache = advertisement
+        return advertisement
+
+    def discover_capabilities(self) -> dict[str, JSONValue]:
+        """The candidate-facing capability-discovery operation
+        (`GET /capabilities`): returns the same frozen advertisement
+        `capabilities()` always returns for this session, and records the
+        discovery in the session log every time it is called (GPI-FR-009).
+        Repeated discovery is deterministic by construction: the
+        advertisement is computed once and cached (see
+        `_resource_scoped_operations`), so every logged entry's
+        `advertisement` field is identical, while each call still gets its
+        own log entry (auditable: a reviewer can see exactly how many
+        times, and when, the candidate asked)."""
+        advertisement = self.capabilities()
+        self.log.record_discovery(advertisement=advertisement)
+        return advertisement
 
     # -- capability enforcement (review follow-up: scenario-visible allowlist,
-    # enforced before any ToolFacade call, never derived from the oracle) ---
-
-    def _write_operations(self) -> dict[str, str]:
-        """tool_name -> namespace, for every plan step advertised as a
-        `write` operation by `capabilities()`."""
-        return {
-            step.tool_name: step.namespace or ""
-            for step in self.scenario.view.plan.steps
-            if step.kind == "write" and step.tool_name
-        }
-
-    def _compensate_operations(self) -> dict[str, str]:
-        """tool_name -> namespace, for every plan step advertised as a
-        `compensate` operation by `capabilities()`. Disjoint from
-        `_write_operations()` by construction (a plan step has exactly one
-        `kind`) -- a tool advertised as one can never also satisfy the
-        other, which is what makes write/compensate non-interchangeable."""
-        return {
-            step.tool_name: step.namespace or ""
-            for step in self.scenario.view.plan.steps
-            if step.kind == "compensate" and step.tool_name
-        }
-
-    def _readable_namespaces(self) -> set[str]:
-        """Every namespace referenced anywhere in the scenario's
-        adapter-visible plan -- a well-behaved candidate reads a resource
-        before writing to it (as the reference candidate and every
-        baseline profile do), so a namespace is scenario-visible for
-        reading if any plan step (read, write, or compensate) touches it."""
-        return {step.namespace for step in self.scenario.view.plan.steps if step.namespace}
+    # enforced before any ToolFacade call, never derived from the oracle,
+    # and never a separate model from what capabilities() advertises) -----
 
     def _check_capability(self, envelope: RequestEnvelope) -> None:
         """Verify the requested operation is actually advertised by
@@ -211,45 +221,53 @@ class GatewaySession:
         facilities every scenario advertises unconditionally (see
         `capabilities()`), so they carry no additional restriction here."""
         if envelope.action == ACTION_READ:
-            self._check_read_capability(str(envelope.resource["namespace"]))
+            self._check_read_capability(
+                namespace=str(envelope.resource["namespace"]), resource_id=str(envelope.resource["resource_id"])
+            )
         elif envelope.action in (ACTION_WRITE, ACTION_COMPENSATE):
             self._check_write_capability(
                 action=envelope.action,
                 tool_name=str(envelope.resource.get("tool_name", "")),
                 namespace=str(envelope.resource["namespace"]),
+                resource_id=str(envelope.resource["resource_id"]),
             )
 
-    def _check_read_capability(self, namespace: str) -> None:
-        if namespace not in self._readable_namespaces():
+    def _check_read_capability(self, *, namespace: str, resource_id: str) -> None:
+        visible = readable_resources(self._resource_scoped_operations())
+        if (namespace, resource_id) not in visible:
             raise CapabilityViolationError(
-                f"namespace {namespace!r} is not scenario-visible for this session "
-                f"(advertised namespaces: {sorted(self._readable_namespaces())!r})"
+                f"resource {namespace}:{resource_id} is not scenario-visible for reading "
+                f"(advertised resources: {sorted(f'{ns}:{rid}' for ns, rid in visible)!r})"
             )
 
-    def _check_write_capability(self, *, action: str, tool_name: str, namespace: str) -> None:
-        if action == ACTION_WRITE:
-            advertised = self._write_operations()
-            other = self._compensate_operations()
-            kind_label = "write"
-        else:
-            advertised = self._compensate_operations()
-            other = self._write_operations()
-            kind_label = "compensate"
+    def _check_write_capability(self, *, action: str, tool_name: str, namespace: str, resource_id: str) -> None:
+        operations = self._resource_scoped_operations()
+        matching_action = operations_by_action_and_tool(operations, action=action, tool_name=tool_name)
+        other_action = ACTION_COMPENSATE if action == ACTION_WRITE else ACTION_WRITE
 
-        if tool_name not in advertised:
-            if tool_name in other:
+        if not matching_action:
+            matching_other = operations_by_action_and_tool(operations, action=other_action, tool_name=tool_name)
+            if matching_other:
                 raise CapabilityViolationError(
-                    f"tool {tool_name!r} is advertised as a "
-                    f"{'compensate' if kind_label == 'write' else 'write'} operation, not {kind_label!r} "
+                    f"tool {tool_name!r} is advertised as a {other_action!r} operation, not {action!r} "
                     f"-- write and compensate operations are not interchangeable"
                 )
+            known_tools = sorted({op.tool_name for op in operations if op.action == action and op.tool_name})
             raise CapabilityViolationError(
-                f"tool {tool_name!r} is not an advertised {kind_label!r} operation for this scenario "
-                f"(advertised {kind_label} tools: {sorted(advertised)!r})"
+                f"tool {tool_name!r} is not an advertised {action!r} operation for this scenario "
+                f"(advertised {action} tools: {known_tools!r})"
             )
-        if advertised[tool_name] != namespace:
+
+        if not any(op.namespace == namespace and op.resource_id == resource_id for op in matching_action):
+            if any(op.namespace == namespace for op in matching_action):
+                advertised_resources = sorted(op.resource_id for op in matching_action if op.namespace == namespace)
+                raise CapabilityViolationError(
+                    f"resource_id {resource_id!r} is not advertised for {action!r} tool {tool_name!r} "
+                    f"under namespace {namespace!r} (advertised resource_id(s): {advertised_resources!r})"
+                )
+            advertised_namespaces = sorted({op.namespace for op in matching_action})
             raise CapabilityViolationError(
-                f"tool {tool_name!r} is advertised under namespace {advertised[tool_name]!r}, "
+                f"tool {tool_name!r} is advertised under namespace(s) {advertised_namespaces!r} for {action!r}, "
                 f"not {namespace!r}"
             )
 

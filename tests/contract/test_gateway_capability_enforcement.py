@@ -194,6 +194,138 @@ def test_valid_write_and_compensate_operations_are_accepted() -> None:
     assert session.log.tool_facade_call_count() == 2
 
 
+def test_valid_write_tool_and_namespace_with_wrong_resource_id_is_rejected() -> None:
+    scenario = PACK.get("ER-04")
+    session = GatewaySession.start(scenario, seed=0, run_id="cap-write-wrong-resource")
+    outcome = session.handle(
+        _envelope(
+            session,
+            action="write",
+            # reserve_inventory/inventory is real, but only for SKU-4004, not this id
+            resource={"namespace": "inventory", "resource_id": "SKU-9999", "tool_name": "reserve_inventory"},
+            idempotency_key="idem-1",
+        )
+    )
+    assert not outcome.accepted
+    assert outcome.rejection is not None
+    assert outcome.rejection.reason == "capability_violation"
+    assert "resource_id" in outcome.rejection.detail
+    assert session.log.tool_facade_call_count() == 0
+
+
+def test_valid_compensation_tool_and_namespace_with_wrong_resource_id_is_rejected() -> None:
+    scenario = PACK.get("ER-04")
+    session = GatewaySession.start(scenario, seed=0, run_id="cap-comp-wrong-resource")
+    outcome = session.handle(
+        _envelope(
+            session,
+            action="compensate",
+            # release_inventory/inventory is real, but only for SKU-4004
+            resource={"namespace": "inventory", "resource_id": "SKU-OTHER", "tool_name": "release_inventory"},
+            idempotency_key="idem-1",
+            parameters={"compensation_for": "reserve-1"},
+        )
+    )
+    assert not outcome.accepted
+    assert outcome.rejection is not None
+    assert outcome.rejection.reason == "capability_violation"
+    assert "resource_id" in outcome.rejection.detail
+    assert session.log.tool_facade_call_count() == 0
+
+
+def test_valid_read_namespace_with_wrong_resource_id_is_rejected() -> None:
+    scenario = PACK.get("ER-04")
+    session = GatewaySession.start(scenario, seed=0, run_id="cap-read-wrong-resource")
+    outcome = session.handle(
+        _envelope(
+            session,
+            action="read",
+            # "inventory" is a scenario-visible namespace, but only for SKU-4004
+            resource={"namespace": "inventory", "resource_id": "SKU-NEVER-MENTIONED"},
+        )
+    )
+    assert not outcome.accepted
+    assert outcome.rejection is not None
+    assert outcome.rejection.reason == "capability_violation"
+    assert session.log.tool_facade_call_count() == 0
+
+
+def test_resource_visible_for_one_operation_but_not_another_is_enforced_per_operation() -> None:
+    """`payment:P-4004` is visible for `read` (implicitly, via the
+    `capture_payment` write step -- a candidate reads before writing) and
+    for `write` (`capture_payment`), but no `compensate` operation in this
+    scenario targets it at all. Visibility is per-operation, not a single
+    blanket "this resource is fine" flag."""
+    scenario = PACK.get("ER-04")
+
+    read_session = GatewaySession.start(scenario, seed=0, run_id="cap-asym-read")
+    read_outcome = read_session.handle(
+        _envelope(read_session, action="read", resource={"namespace": "payment", "resource_id": "P-4004"})
+    )
+    assert read_outcome.accepted
+
+    write_session = GatewaySession.start(scenario, seed=0, run_id="cap-asym-write")
+    write_outcome = write_session.handle(
+        _envelope(
+            write_session,
+            action="write",
+            resource={"namespace": "payment", "resource_id": "P-4004", "tool_name": "capture_payment"},
+            idempotency_key="idem-1",
+        )
+    )
+    assert write_outcome.accepted
+
+    compensate_session = GatewaySession.start(scenario, seed=0, run_id="cap-asym-compensate")
+    compensate_outcome = compensate_session.handle(
+        _envelope(
+            compensate_session,
+            action="compensate",
+            # release_inventory is the only real compensate tool in this
+            # scenario, and it is not advertised against payment:P-4004.
+            resource={"namespace": "payment", "resource_id": "P-4004", "tool_name": "release_inventory"},
+            idempotency_key="idem-1",
+        )
+    )
+    assert not compensate_outcome.accepted
+    assert compensate_outcome.rejection is not None
+    assert compensate_outcome.rejection.reason == "capability_violation"
+    assert compensate_session.log.tool_facade_call_count() == 0
+
+
+def test_exact_positive_visible_resource_cases_for_every_action() -> None:
+    scenario = PACK.get("ER-04")
+    session = GatewaySession.start(scenario, seed=0, run_id="cap-positive-exact")
+
+    read_outcome = session.handle(
+        _envelope(session, action="read", resource={"namespace": "inventory", "resource_id": "SKU-4004"})
+    )
+    assert read_outcome.accepted
+
+    write_outcome = session.handle(
+        _envelope(
+            session,
+            action="write",
+            operation_id="op-write",
+            resource={"namespace": "inventory", "resource_id": "SKU-4004", "tool_name": "reserve_inventory"},
+            idempotency_key="idem-write",
+        )
+    )
+    assert write_outcome.accepted
+
+    compensate_outcome = session.handle(
+        _envelope(
+            session,
+            action="compensate",
+            operation_id="op-compensate",
+            resource={"namespace": "inventory", "resource_id": "SKU-4004", "tool_name": "release_inventory"},
+            idempotency_key="idem-compensate",
+            parameters={"compensation_for": "reserve-1"},
+        )
+    )
+    assert compensate_outcome.accepted
+    assert session.log.tool_facade_call_count() == 3
+
+
 def test_unavailable_scenario_operation_is_rejected() -> None:
     """A tool that exists in the repository's static effect-type
     vocabulary (`cavbench.runtime.tools.TOOL_EFFECT_TYPE`) but is simply
