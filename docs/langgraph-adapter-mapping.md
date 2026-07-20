@@ -64,7 +64,7 @@ this is out of scope for the design-stage skeleton.
 | `state_read` | A node's read via a CAV-Bench tool call (`session.tools.read(...)`), captured in that node's output. |
 | `state_revalidated` | A node that re-reads state and semantically re-evaluates the action immediately before a commit-issuing node. See [Stale-state TOCTOU protection](#stale-state-toctou-protection) — this alone does not close the race. |
 | `effect_attempted` | Authoritative only when recorded synchronously at `session.tools.write(...)` (`ToolFacade.write()`) entry, before `BenchmarkEnvironment` applies the effect. `on_tool_start`/`astream_events` and task-stream (`stream_mode="tasks"`) evidence are *corroborating ordering evidence only* — see [Evidence spine](#evidence-spine-attempted-versus-committed). |
-| `effect_committed` | Authoritative only when derived from the `ToolResult` / `BenchmarkEnvironment` result returned by that same `session.tools.write(...)` call — never from a LangGraph-reported fact. See [Trust boundary](#trust-boundary) and [Evidence spine](#evidence-spine-attempted-versus-committed). |
+| `effect_committed` | Authoritative only when backed by the benchmark-owned `side_effect_commit` trace event / side-effect ledger — never from a LangGraph-reported fact. `ToolResult.status="COMMITTED"` gives the adapter immediate confirmation; `status="AMBIGUOUS"` gives it neither confirmation nor disconfirmation and requires reconciliation. See [Trust boundary](#trust-boundary) and [Evidence spine](#evidence-spine-attempted-versus-committed). |
 | `effect_reconciled` | A node that calls `session.tools.status_check(...)` with the same stable operation identity, performed **unconditionally** before any retry — see [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
 | `compensation_started` / `compensation_completed` | A dedicated compensation node, reached via a conditional edge when a downstream node reports failure. |
 | `escalation_created` | A node calling `session.escalate(...)`, optionally surfaced to a human via LangGraph's `interrupt()` / human-in-the-loop mechanism. |
@@ -72,21 +72,20 @@ this is out of scope for the design-stage skeleton.
 
 ## Evidence spine: attempted versus committed
 
-The **single authoritative evidence spine** for both `effect_attempted` and
-`effect_committed` is the adapter's own call into the tool facade — never
-anything LangGraph observes about itself:
+The **single authoritative evidence spine** for `effect_attempted`,
+`effect_committed`, and ambiguous-commit reconciliation is the adapter's
+own call into the tool facade and the benchmark-owned records that call
+produces — never anything LangGraph observes about itself.
 
-- `effect_attempted` is authoritative **only** when recorded synchronously
-  at `ToolFacade.write()` entry, before `BenchmarkEnvironment` applies the
-  effect.
-- `effect_committed` is authoritative **only** when derived from the
-  `ToolResult` / `BenchmarkEnvironment` result returned by that same call.
+### Attempt evidence
 
-`on_tool_start` (from `astream_events`) and task-stream events
+`effect_attempted` is authoritative **only** when recorded synchronously at
+`ToolFacade.write()` entry, before `BenchmarkEnvironment` applies the
+effect. `on_tool_start` (from `astream_events`) and task-stream events
 (`stream_mode="tasks"`) are **corroborating ordering evidence only** —
 useful for reconstructing *when* things happened relative to each other,
-never a substitute for the two facts above. This is load-bearing, not
-cautious phrasing, for two reasons:
+never a substitute for that fact. This is load-bearing, not cautious
+phrasing, for two reasons:
 
 - **A plain graph node that calls `session.tools.write(...)` directly (not
   through a LangChain-wrapped `Tool`) may emit no `on_tool_start` event at
@@ -104,6 +103,56 @@ cautious phrasing, for two reasons:
   [Fine-grained node boundaries](#fine-grained-node-boundaries)) — that is
   a property of the fixture's design, not a general LangGraph guarantee.
 
+### Immediate confirmed commit
+
+A `ToolResult` with `status="COMMITTED"` gives the adapter an **immediate,
+adapter-visible confirmation** that the effect committed. Even so, the
+benchmark-owned `side_effect_commit` trace event and side-effect ledger
+remain the actual authoritative scoring evidence — `DeterministicEvaluator`
+derives `effect_committed` from those benchmark-owned records directly,
+never from the adapter having observed `status="COMMITTED"` and reported it
+onward.
+
+### Ambiguous response: what `ToolResult` cannot tell the adapter
+
+`BenchmarkEnvironment.commit()` records the `side_effect_commit` trace
+event and appends to the side-effect ledger **before** it decides whether
+to return `status="COMMITTED"` or simulate a lost response and return
+`status="AMBIGUOUS"` (`src/cavbench/runtime/environment.py`'s
+`after_commit_before_response` fault hook). This means an `AMBIGUOUS`
+response can mean the effect **already committed** — the caller genuinely
+cannot distinguish "committed, response lost" from "not committed" using
+`ToolResult` alone, and `ToolFacade.write()` exposes no trusted
+`committed=True` field that would resolve this for the adapter.
+
+Consequently:
+
+- A `ToolResult` with `status="AMBIGUOUS"` **establishes neither outcome**
+  — not committed, not uncommitted.
+- The adapter **must not** emit or infer confirmed `effect_committed`
+  evidence from an `AMBIGUOUS` response alone.
+- The adapter must reconcile via `session.tools.status_check(...)`, using
+  the *same* stable idempotency key, before ever attempting a retry — see
+  [Unconditional reconciliation before retry](#unconditional-reconciliation-before-retry).
+- The benchmark-owned trace and ledger — not the adapter's own guess about
+  what `AMBIGUOUS` meant — determine whether the effect actually committed.
+  `DeterministicEvaluator` reads those records directly and never consults
+  what the adapter inferred.
+
+### Reconciliation is corroborating evidence, not new authority
+
+`status_check(...)` returning `COMMITTED` is `effect_reconciled` evidence:
+it tells the adapter that a prior attempt with this operation identity did
+commit, so it can avoid a duplicate write. It does **not** retroactively
+make LangGraph's own state, or anything the adapter self-reports, an
+authoritative source of commit truth — the benchmark-owned trace and ledger
+already recorded the actual outcome at commit time, independent of when or
+whether the adapter ever calls `status_check`. Normalized event correlation
+between `effect_attempted`, `effect_committed`, and `effect_reconciled`
+must use the same **stable operation identity** throughout (see
+[Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation))
+— never a freshly generated identifier per call.
+
 This document does **not** specify a complete runtime normalized-event
 emission mechanism — deciding exactly which LangGraph callback/stream hooks
 the adapter subscribes to, and how it correlates them with tool-facade
@@ -116,23 +165,67 @@ design-stage PR. It is recorded as a required item under
 `interrupt()` and `Command(resume=...)` make an authorization decision
 **externally observable** — a human or a scripted process can see the
 decision point and provide a response. They do **not** make that response
-authorization truth:
+authorization truth.
 
+### A. LangGraph observability
+
+- `interrupt()` / `Command(resume=...)` expose an approval or decision
+  point to a human or scripted process.
 - The resume payload is **adapter/harness input**, exactly like any other
   value a node receives — it carries no more trust than an argument the
-  graph was called with.
-- **Current authorization must still be adjudicated by the facade or
-  `BenchmarkEnvironment`** at commit time, independent of what the resume
-  payload said.
-- A revoked actor must receive an **environment-level hard refusal**
-  regardless of an "approve" resume value — a stale approval cannot
-  override a real revocation.
+  graph was called with, and is **not itself authorization truth**.
 - **CI fixtures use deterministic scripted resume values, not a human**, to
   keep the four scenarios reproducible (`docs/methodology.md`'s
   determinism requirements apply here exactly as everywhere else in
   CAV-Bench).
-- The **facade/environment check is primary truth; the interrupt is an
-  optional observability wrapper** around it, not a replacement for it.
+
+### B. Current adapter behavior
+
+- The adapter must perform a **fresh, authoritative read and semantic
+  authority evaluation immediately before attempting the consequential
+  action** — the same commit-time revalidation discipline as
+  [Stale-state TOCTOU protection](#stale-state-toctou-protection), applied
+  to authority rather than resource state.
+- A stale planning-time approval — including an earlier `interrupt()`
+  resume value — must **never** be treated as sufficient on its own to
+  justify the write.
+
+### C. Current runtime limitation and future prerequisite
+
+The community-expert review that produced this section correctly
+identified the desired trust property: a revoked actor should receive a
+hard refusal that a stale "approve" resume value cannot override. This
+section documents that **the present CAV-Bench runtime does not yet
+implement that property as an atomic guarantee** — the review identified
+the right target; this is a statement about today's implementation, not a
+disagreement with the review.
+
+- `ToolFacade.write()` currently receives no actor identity or complete
+  authorization context (`src/cavbench/runtime/tools.py`), and
+  `BenchmarkEnvironment.commit()` currently has no general
+  authorization-adjudication interface (`src/cavbench/runtime/environment.py`)
+  — its commit-time checks cover forced-failure hooks, the
+  `expected_version` compare-and-set guard, and idempotency-key replay, but
+  nothing authority-specific.
+- Therefore the fresh adapter-side revalidation in (B) **narrows, but does
+  not atomically close,** the authority time-of-check/time-of-use window —
+  structurally the same limitation as
+  [Stale-state TOCTOU protection](#stale-state-toctou-protection): between
+  the adapter's fresh authority check and the actual
+  `session.tools.write(...)` call, authority could still change.
+- The evaluator can already independently identify an invalid
+  authority-related outcome from benchmark-owned evidence and oracle
+  constraints (`authority_validity` in
+  `src/cavbench/evaluation/evaluator.py`) regardless of this limitation —
+  that scoring path is unaffected and requires no change here.
+- **Commit-boundary authority enforcement — an atomic, environment-level
+  hard refusal comparable to the `expected_version` compare-and-set guard —
+  requires a separately reviewed runtime design change** to carry
+  authorization context into `ToolFacade.write()` /
+  `BenchmarkEnvironment.commit()`. It is not implemented in this PR (see
+  [Next implementation milestones](#next-implementation-milestones)), and
+  no future PR — including PR #8 — may claim this capability unless it is
+  actually implemented and tested through that approved runtime change.
 
 ## Four scenario execution flows
 
@@ -153,11 +246,13 @@ in terms of the graph:
    simulates a lost response — injected **before the write super-step's
    checkpoint is persisted** (see
    [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation)),
-   mirroring CAV-Bench's own `ambiguous_response` fault mode. On resume,
-   the node must derive the *same* operation identity it used originally
-   from checkpointed state and perform **unconditional** reconciliation
-   (`session.tools.status_check(...)`) before ever attempting a second
-   write.
+   mirroring CAV-Bench's own `ambiguous_response` fault mode. Per
+   [Ambiguous response](#ambiguous-response-what-toolresult-cannot-tell-the-adapter),
+   the resulting `status="AMBIGUOUS"` tells the node neither that the
+   effect committed nor that it didn't. On resume, the node must derive the
+   *same* operation identity it used originally from checkpointed state and
+   perform **unconditional** reconciliation (`session.tools.status_check(...)`)
+   before ever attempting a second write.
 3. **Partial workflow execution.** A first node's effect commits; a
    downstream node's tool call is force-failed. A conditional edge routes
    to a compensation node (or an escalation node, if no compensation is
@@ -169,10 +264,12 @@ in terms of the graph:
    value, never a human. The fixture then revokes authority before the
    commit node runs. Per
    [Authority: observability versus truth](#authority-observability-versus-truth),
-   the earlier resume payload is not authorization truth: the commit node's
-   write must still be adjudicated by `BenchmarkEnvironment` at commit
-   time, and `session.tools.write(...)` must be refused if authority no
-   longer holds, regardless of what the resume payload said earlier.
+   the earlier resume payload is not authorization truth: the commit node
+   must perform a fresh authority read and semantic re-check immediately
+   before `session.tools.write(...)`, regardless of what the resume payload
+   said earlier. This narrows, but — per (C) in that section — does not
+   atomically close, the authority TOCTOU window, since the current write
+   boundary does not itself adjudicate authorization.
 
 ## Stale-state TOCTOU protection
 
@@ -288,13 +385,18 @@ granularity.
 LangGraph's own state reflects that a node *ran* and what it *returned* —
 it does not, by itself, distinguish "the external system confirmed this
 effect committed" from "the node believes it committed" or "the node timed
-out without knowing." This is exactly the gap `session.tools.write(...)`'s
-returned `ToolResult.status` closes (`COMMITTED` / `CONFLICT` / `AMBIGUOUS`
-/ `IDEMPOTENT_REPLAY` / `FAILED`, per `docs/adapter-authoring.md`) — the
-adapter must always treat that response, not the node's own control flow
-having "succeeded," as the attempted-vs-committed evidence. This is the
-same distinction [Trust boundary](#trust-boundary) describes generally and
-[Evidence spine](#evidence-spine-attempted-versus-committed) describes
+out without knowing." `session.tools.write(...)`'s returned
+`ToolResult.status` (`COMMITTED` / `CONFLICT` / `AMBIGUOUS` /
+`IDEMPOTENT_REPLAY` / `FAILED`, per `docs/adapter-authoring.md`) is what the
+adapter must treat as attempted-vs-committed evidence, never the node's own
+control flow having "succeeded" — but that response only fully closes the
+gap when it is `COMMITTED`. An `AMBIGUOUS` response leaves the adapter with
+neither confirmation nor disconfirmation; it must reconcile via
+`status_check(...)` rather than guess, and the benchmark-owned trace and
+ledger remain the actual authority regardless of what the adapter guesses
+(see [Evidence spine](#evidence-spine-attempted-versus-committed)). This is
+the same distinction [Trust boundary](#trust-boundary) describes generally
+and [Evidence spine](#evidence-spine-attempted-versus-committed) describes
 mechanically; it is called out separately here because it is the most
 common way a framework integration would accidentally re-introduce a
 self-grading path.
@@ -311,6 +413,17 @@ time-of-check/time-of-use protection for the stale-state scenario, stable
 operation identity and reconciliation requirements, and skeleton test
 coverage. **These corrections have been incorporated** into this document
 and the skeleton's test suite.
+
+A follow-up self-review against the current runtime implementation
+(`src/cavbench/runtime/tools.py`, `src/cavbench/runtime/environment.py`)
+found that two statements in the incorporated corrections described the
+*desired* trust properties more strongly than the *current* runtime
+implements them: (1) `effect_committed` evidence in the ambiguous-response
+case, and (2) commit-boundary authority enforcement. Both are now corrected
+— see [Evidence spine](#evidence-spine-attempted-versus-committed) and
+[Authority: observability versus truth](#authority-observability-versus-truth)
+respectively — without disputing the reviewer's identification of the
+target properties themselves.
 
 This is **not**: official LangChain endorsement, official LangGraph
 endorsement, LangGraph maintainer approval, adoption, or production
@@ -353,6 +466,13 @@ clarifications:
    asserting on CAV-Bench's independently-derived `EvaluationResult`, not
    on anything the graph or adapter self-reports.
 6. Optional `langgraph` extra added to `pyproject.toml`.
-7. External review request directed at a LangGraph maintainer specifically
+7. Commit-boundary authority enforcement: a separately reviewed runtime
+   design change to carry authorization context into
+   `ToolFacade.write()` / `BenchmarkEnvironment.commit()`, providing an
+   atomic, environment-level hard refusal for revoked authority (see
+   [Authority: observability versus truth](#authority-observability-versus-truth),
+   part C). This is a runtime prerequisite, not adapter work, and is
+   out of scope for the LangGraph adapter itself.
+8. External review request directed at a LangGraph maintainer specifically
    (as opposed to the community-expert review already received), per
    Issue #3's open maintainer questions.
