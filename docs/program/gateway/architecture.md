@@ -310,16 +310,36 @@ Net behavior: `stop()` before `start()` only closes the listening
 socket and returns immediately; `start()` while already running is an
 idempotent no-op; `start()` after `stop()` (including after a startup
 failure, which also transitions to the terminal `stopped` state) raises
-`cavbench.gateway.errors.ServerLifecycleError`; `stop()` is idempotent
-and calls `server_close()` exactly once regardless of how many times it
-is called, including after a startup-failure cleanup already ran. Normal
+`cavbench.gateway.errors.ServerLifecycleError`. Normal
 `with GatewayRestServer(session) as server:` use is unaffected,
 including cleanup after an exception inside the block.
 
+**`stop()` uses the same honest-termination contract as the
+startup-timeout path.** A review found `_cleanup()`'s contract --
+`False` means the thread's termination could not be confirmed within
+the bound, and callers must treat that as a real failure -- was honored
+by `start()`'s timeout path but silently discarded by ordinary `stop()`,
+which reported success even when the server thread was still alive.
+`stop()` now raises `ServerLifecycleError` under the same condition,
+stating that cancellation was requested but the thread did not
+terminate within `_SHUTDOWN_JOIN_TIMEOUT_SECONDS`. The socket is still
+closed exactly once regardless of whether the thread terminated in time
+(`_closed` is guarded independently of `_state`, so `server_close()`
+never runs twice across a failed attempt and a later retry). A `stop()`
+that raised this way can simply be called again: `_state` is already
+the terminal `"stopped"`, so the call re-signals cancellation (harmless
+if already signaled) and retries the join against the same thread --
+once that thread has actually exited, the retry succeeds harmlessly,
+and further calls remain idempotent. The callable `serve()` returns is
+`GatewayRestServer.stop` itself, so it carries the identical contract;
+`__exit__` calling `stop()` means a context-manager exit surfaces the
+same failure the same way.
+
 Test-server injection uses a private `_server_class` constructor
-parameter (never a post-construction attribute swap), so a test double
-is installed *before* any socket is bound and the real default server is
-never separately constructed, let alone leaked. See
+parameter on both `GatewayRestServer.__init__` and `serve()` (never a
+post-construction attribute swap), so a test double is installed
+*before* any socket is bound and the real default server is never
+separately constructed, let alone leaked. See
 `tests/unit/test_gateway_rest_lifecycle.py`, which bounds every risky
 call with a daemon-thread timeout helper (so a regression that
 reintroduces a hang fails the test loudly instead of hanging the suite)
@@ -329,11 +349,17 @@ and covers: rapid repeated start/stop cycles; competing threads calling
 that leaves no live server thread; `stop()` after a startup failure
 being harmless and repeatable without a second `server_close()` call;
 startup-failure cleanup completing within a bounded timeout; the honest
-"could not be terminated" report when cleanup's own join cannot confirm
-termination; ten repeated startup-failure runs compared against the
-process's live-thread set before and after, proving none accumulate; and
-that injecting a test server never leaks a separately-constructed
-default one.
+"could not be terminated" report from both the startup path and
+ordinary `stop()` (the latter driven by an `Event`-gated test double
+that ignores cancellation until the test explicitly releases it, never
+a wall-clock sleep) with a verified-still-alive thread at the moment of
+the raise; a successful retry once that thread actually exits;
+`server_close()` never double-called across a failed attempt and its
+retry; the same failure surfacing through context-manager `__exit__`
+and through the stopper `serve()` returns; ten repeated startup-failure
+runs compared against the process's live-thread set before and after,
+proving none accumulate; and that injecting a test server never leaks a
+separately-constructed default one.
 
 ## Components
 

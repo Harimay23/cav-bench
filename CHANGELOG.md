@@ -82,7 +82,17 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   `stop()`/`server_close()` are safe to call repeatedly
   (`tests/unit/test_gateway_rest_lifecycle.py`, including repeated
   startup-failure runs checked against the process's live-thread set for
-  leaks). Adds: the
+  leaks). `stop()` now honors the same honest-termination contract as the
+  startup-timeout path: it raises `ServerLifecycleError` if the bounded
+  join cannot confirm the server thread actually terminated, rather than
+  discarding that result and reporting success while the thread is still
+  alive; the socket is still closed exactly once, state remains
+  `"stopped"`, and a later `stop()` call safely retries the join,
+  succeeding harmlessly once the thread exits. The same behavior applies
+  to direct `stop()`, the callable `serve()` returns, and context-manager
+  `__exit__` (`tests/unit/test_gateway_rest_lifecycle.py`, using an
+  `Event`-gated test double, never a wall-clock sleep, to simulate an
+  uncooperative thread). Adds: the
   common protocol envelope (`cavbench.gateway.envelope`, schema at
   `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
   neutral gateway core (`cavbench.gateway.core`); the capability model
