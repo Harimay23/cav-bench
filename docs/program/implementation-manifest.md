@@ -93,14 +93,17 @@ its own PRs, and must not be modified by executors working this queue.
   reconciliation on the candidate's behalf; network egress beyond
   loopback in benchmark mode.
 - **implementation deliverables:** envelope schema + docs; shared
-  gateway core (session binding, 1:1 request-to-ToolFacade mapping,
-  session log); first transport frontend; reference candidate client;
-  candidate-facing mapping documentation; CI example.
+  gateway core (session binding, capability enforcement, the
+  request-to-attempt mapping, session log); first transport frontend;
+  reference candidate client; candidate-facing mapping documentation; CI
+  example.
 - **required tests:** envelope/normalization unit tests; identity
   pass-through (no mutation) tests; redaction tests; adversarial
-  forged-final-report contract test; gateway neutrality tests (exact 1:1
-  request↔attempt correspondence, no unrequested reconciliation or
-  retries); malformed-request tests (no benchmark attempt created);
+  forged-final-report contract test; gateway neutrality tests (every
+  accepted tool-operation request maps to exactly one ToolFacade
+  invocation, final-report submission maps to zero by design, no
+  unrequested reconciliation or retries); malformed-request and
+  capability-violation tests (no benchmark attempt created);
   reference-candidate integration tests over the four hazard patterns in
   guarded and flawed configurations; determinism (double-run hash)
   check; extras-isolation import test; full quality gate.
