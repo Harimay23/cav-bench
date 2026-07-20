@@ -66,7 +66,7 @@ its own PRs, and must not be modified by executors working this queue.
   `38c5e1e8590e17c2798618c0490db7958d7f739d` — the proposed
   gateway-mediated topology and REST-first transport order are confirmed
   by the record)
-- **issue placeholder:** `ISSUE-TBD-GPI-1`
+- **issue:** [#11 — `[M-GPI-1] Implement generic protocol gateway core with REST frontend`](https://github.com/Harimay23/cav-bench/issues/11)
 - **branch name (proposed):** `feat/generic-protocol-integration`
 - **PR title (proposed):** `feat: add generic protocol integration core with first transport`
 - **dependency milestones:** none in this queue; design approval is now
@@ -74,7 +74,11 @@ its own PRs, and must not be modified by executors working this queue.
   topology and REST-first transport order; a `DECISION_LOG.md` entry at
   implementation time recording both remains required (per `AGENTS.md`
   scope discipline and approval Condition 1).
-- **current status:** `APPROVED_FOR_IMPLEMENTATION`
+- **current status:** `IMPLEMENTING` (transitioned from
+  `APPROVED_FOR_IMPLEMENTATION` at execution journal
+  `docs/program/journal/execution-journal.jsonl` checkpoint `ckpt-0001` on
+  branch `feat/generic-protocol-integration`, base `origin/main`
+  `7d55cc9666a403571f048ed3ca50aa309f8a977b`)
 - **allowed actions:** new optional-extra modules for the gateway core
   and first transport frontend; deterministic reference candidate client
   (examples-adjacent); CI example job; documentation; changelog +
