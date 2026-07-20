@@ -196,6 +196,60 @@ anything returned by `capabilities()`, `discover_capabilities()`, or
 any other call's return value, or any already-recorded log entry — see
 `tests/contract/test_gateway_capability_immutability.py`.
 
+## Request serialization
+
+Every REST request handler shares one mutable `GatewaySession` — its
+`BenchmarkEnvironment`, `ToolFacade`, idempotency map, final-report state,
+and session log. A prior review found `GatewayRestServer` used
+`http.server.ThreadingHTTPServer`, which would let two requests mutate
+that shared state concurrently: request order, commit order, trace
+order, and session-log ordering would all become nondeterministic —
+exactly the property this benchmark exists to measure, not to introduce
+into its own measurement plumbing.
+
+`GatewayRestServer` now uses plain `http.server.HTTPServer` (no
+`ThreadingMixIn`): it accepts and fully handles one connection before
+accepting the next, so two "simultaneous" client requests are, by
+construction, processed strictly one at a time, never concurrently. This
+is the simplest approved deterministic model — no remote mode, worker
+pools, asynchronous execution, batching, or parallel commit semantics.
+See `tests/contract/test_gateway_rest_concurrency.py`, which fires
+several requests from separate client threads at once and proves, via an
+instrumented wrapper around `GatewaySession.handle` (the single entry
+point for every request kind, including reads, writes, compensation,
+reconciliation, and the final report), that handling never overlaps;
+that accepted concurrent requests still map one-to-one to `ToolFacade`
+calls; that session-log sequence numbers stay unique and contiguous;
+that ledger commits never race; that report submission cannot race a
+consequential operation; and that two independent runs of the same
+concurrent workload converge on the same final benchmark state (the
+same `tool_facade_call_count`, ledger effect count, and log-entry
+shapes), even though true TCP connection-arrival order across
+independent client threads is not itself something the test suite
+controls.
+
+## Server lifecycle
+
+`GatewayRestServer` lifecycle states: `created -> running -> stopped`.
+A prior review found `stop()` before `start()` hung, because
+`socketserver.TCPServer.__init__` (transitively, `HTTPServer.__init__`)
+already binds and listens on the socket — so it exists even if
+`serve_forever()` was never started — while `HTTPServer.shutdown()`
+blocks waiting for a `serve_forever()` loop iteration that will never
+happen if the loop was never running. `start()`/`stop()` are now
+lifecycle-aware: `stop()` before `start()` only closes the listening
+socket, never calls `shutdown()`, and returns immediately; `start()`
+while already running is an idempotent no-op; `start()` after `stop()`
+raises `cavbench.gateway.errors.ServerLifecycleError` (restarting a
+stopped `HTTPServer` is not supported); `stop()` is idempotent and calls
+`server_close()` exactly once regardless of how many times it is
+called. Normal `with GatewayRestServer(session) as server:` use is
+unaffected, including cleanup after an exception inside the block
+(Python's context-manager protocol always runs `__exit__`). See
+`tests/unit/test_gateway_rest_lifecycle.py`, which bounds every risky
+call with a daemon-thread timeout helper so a regression that
+reintroduces a hang fails the test loudly instead of hanging the suite.
+
 ## Components
 
 | Component | Module | Responsibility |
@@ -206,7 +260,7 @@ any other call's return value, or any already-recorded log entry — see
 | Bind validation | `cavbench.gateway.bind` | Rejects any non-loopback REST bind address before a socket opens. |
 | Redaction | `cavbench.gateway.redaction` | Strips run tokens/secrets from anything recorded. |
 | Session log | `cavbench.gateway.session_log` | Redacted, genuinely append-only record of every wire exchange (including gateway-level rejections). Internal storage is private; `record_request`/`record_rejection`/`record_discovery` are the only append paths; the public `entries` property and `to_list()` both return fresh defensive copies, so a caller can never clear, append to, reorder, or mutate the stored log (see `tests/unit/test_gateway_session_log.py`). |
-| REST frontend | `cavbench.gateway.rest` | Standard-library `http.server` HTTP mapping of the envelope, loopback-only. |
+| REST frontend | `cavbench.gateway.rest` | Standard-library `http.server` HTTP mapping of the envelope, loopback-only, deliberately single-threaded (see "Request serialization" below). |
 | Reference candidate | `examples.reference_candidate` | Deterministic scripted test-subject client — a fixture, never part of the gateway. |
 
 None of the above is imported by `cavbench/__init__.py` or `cavbench.api`

@@ -3,7 +3,12 @@
 Module: [`cavbench.gateway.rest`](../../../src/cavbench/gateway/rest.py).
 Standard-library `http.server` only — no new runtime dependency
 (`DECISION_LOG.md` D-009, D-021). Binds to `127.0.0.1` by default
-(loopback-only benchmark mode).
+(loopback-only benchmark mode). Deliberately single-threaded
+(`http.server.HTTPServer`, not `ThreadingHTTPServer`): requests are
+handled one at a time, in full, before the next is accepted, so wire
+concurrency can never make the shared session's commit order, trace
+order, or log order nondeterministic — see
+[`architecture.md`](architecture.md#request-serialization).
 
 ## Routes
 

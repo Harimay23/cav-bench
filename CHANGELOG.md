@@ -47,7 +47,22 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   paths are `record_request`/`record_rejection`/`record_discovery`, and
   the public `entries` property and `to_list()` return fresh defensive
   copies, so a caller can never clear, append to, reorder, or mutate
-  what is actually stored. Adds: the
+  what is actually stored. The REST server is deliberately
+  single-threaded (`http.server.HTTPServer`, never `ThreadingHTTPServer`):
+  every handler shares one mutable `GatewaySession`, so concurrent
+  handling would make commit order, trace order, and log order
+  nondeterministic; requests are now handled one at a time, in full,
+  before the next is accepted, proven by
+  `tests/contract/test_gateway_rest_concurrency.py` (no overlap, 1:1
+  request-to-`ToolFacade` mapping under concurrent load, monotonic log
+  sequencing, no racing ledger commits, report submission cannot race a
+  consequential operation, deterministic final state across repeated
+  concurrent runs). Server lifecycle (`created -> running -> stopped`)
+  is now deterministic and idempotent: `stop()` before `start()` no
+  longer hangs, `start()` while running is a no-op, `start()` after
+  `stop()` raises `ServerLifecycleError`, and `stop()`/`server_close()`
+  are safe to call repeatedly (`tests/unit/test_gateway_rest_lifecycle.py`).
+  Adds: the
   common protocol envelope (`cavbench.gateway.envelope`, schema at
   `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
   neutral gateway core (`cavbench.gateway.core`); the capability model
