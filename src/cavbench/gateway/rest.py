@@ -255,18 +255,25 @@ class GatewayRestServer:
       distinct `ServerLifecycleError` stating startup failed *and* the
       server thread could not be terminated, rather than silently
       claiming clean teardown.
-    - `stop()` before `start()` (or after a startup failure) is
-      idempotent and harmless: cancellation is signaled (a no-op if
-      nothing is running), there is nothing to join, and the socket is
-      closed exactly once.
+    - `stop()` before `start()` is idempotent and harmless: cancellation
+      is signaled (a no-op if nothing is running), there is nothing to
+      join, and the socket is closed exactly once.
     - `start()` while already running is an idempotent no-op; `start()`
       after `stop()` (including after a startup failure, which also
       transitions to the terminal `stopped` state) raises
       `ServerLifecycleError`.
-    - `stop()` is idempotent and calls `server_close()` exactly once,
-      guarded by an internal flag independent of `_state` so repeated
-      calls -- including after a startup-failure cleanup already ran --
-      never double-close.
+    - `stop()` uses the same honest-termination contract as `start()`'s
+      timeout path: if the bounded join cannot confirm the server thread
+      has actually terminated, `stop()` raises `ServerLifecycleError`
+      rather than silently reporting success while the thread is still
+      alive. The socket is still closed exactly once regardless (guarded
+      by an internal flag independent of `_state`, so repeated calls --
+      including a retry after a termination-failure `stop()`, or after a
+      startup-failure cleanup already ran -- never double-close). A
+      `stop()` that raised this way can simply be called again: it
+      re-signals cancellation (harmless if already signaled) and retries
+      the join against the same thread; once that thread has actually
+      exited, the retry succeeds harmlessly.
     - Because `start()` and `stop()` hold the same lock for their full
       duration (including any bounded wait), a `stop()` racing a
       `start()` simply waits for `start()` to finish resolving to a
@@ -348,12 +355,32 @@ class GatewayRestServer:
             self._state = "running"
 
     def stop(self) -> None:
+        """Request cancellation, join the server thread (bounded), and
+        close the socket -- honestly. `_cleanup()`'s contract is that a
+        `False` return means the thread's termination could not be
+        confirmed within the bound, and callers must treat that as a real
+        failure, not a successful shutdown. `stop()` now honors that
+        contract instead of discarding the result: it raises
+        `ServerLifecycleError` when termination cannot be confirmed,
+        exactly as `start()`'s startup-timeout path already does.
+
+        Always safe to call again after such a failure: `_state` is
+        already `"stopped"` (a terminal state, so this call does not
+        re-enter "running"), and re-invoking `_cleanup()` re-signals
+        cancellation (harmless if already signaled) and retries the join
+        against the *same* thread reference -- if it has since exited,
+        this call succeeds harmlessly; the socket, already closed on the
+        first attempt (`_cleanup()` closes it regardless of thread
+        status), is never closed a second time (`_closed` guards that
+        independently of how many times `stop()` itself is called)."""
         with self._lock:
-            if self._state == "stopped":
-                self._cleanup(join_timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)  # idempotent no-op if already clean
-                return
             self._state = "stopped"
-            self._cleanup(join_timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)
+            terminated = self._cleanup(join_timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)
+            if not terminated:
+                raise ServerLifecycleError(
+                    f"GatewayRestServer requested cancellation but the server thread did not "
+                    f"terminate within {_SHUTDOWN_JOIN_TIMEOUT_SECONDS}s"
+                )
 
     def _cleanup(self, *, join_timeout: float) -> bool:
         """Signal cancellation (always safe), join the server thread
@@ -386,9 +413,19 @@ class GatewayRestServer:
 
 
 def serve(
-    session: GatewaySession, *, host: str = "127.0.0.1", port: int = 0
+    session: GatewaySession,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    _server_class: type[_ManagedHTTPServer] = _ManagedHTTPServer,
 ) -> Callable[[], None]:
-    """Convenience helper: start a server, return a callable that stops it."""
-    server = GatewayRestServer(session, host=host, port=port)
+    """Convenience helper: start a server, return a callable that stops
+    it. The returned stopper *is* `GatewayRestServer.stop` -- it carries
+    the same honest-termination contract (raises `ServerLifecycleError`
+    if the server thread's termination cannot be confirmed within the
+    bound) rather than a separate, potentially-inconsistent wrapper.
+    `_server_class` is the same private, test-only injection point as
+    `GatewayRestServer.__init__`'s."""
+    server = GatewayRestServer(session, host=host, port=port, _server_class=_server_class)
     server.start()
     return server.stop
