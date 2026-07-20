@@ -79,23 +79,54 @@ enforcing this (request-to-attempt correspondence, malformed/auth/
 capability-violation zero-attempt guarantees, no unrequested
 reconciliation, no gateway-side retry).
 
+## One canonical capability model
+
+`cavbench.gateway.capabilities` is the single source of truth for what a
+scenario makes visible — both `GatewaySession.capabilities()`
+(advertisement) and `GatewaySession._check_capability()` (enforcement)
+read from the same `derive_operations(view)` call, so the two can never
+silently diverge (a real risk with the initial implementation, which kept
+two separately-written, tool-name-keyed lookups).
+
+`derive_operations` walks the adapter-visible `ScenarioView.plan` once
+and produces a tuple of `OperationDescriptor`s, each a full
+`(action, tool_name, namespace, resource_id)` tuple (`tool_name` is
+`None` for `read`). **Deduplication is by the full tuple, never by
+`tool_name` alone**: the same tool name can validly appear more than
+once with distinct descriptors — under a different action, a different
+namespace, or a different `resource_id` — and each combination is
+advertised and enforced independently (see
+`tests/unit/test_gateway_capabilities_model.py`). Write and compensate
+descriptors are not claimed to be disjoint "by construction" — nothing
+in the model prevents a future scenario pack from reusing a tool name
+across both actions; what actually makes them non-interchangeable is
+that enforcement matches on the full descriptor, not on `tool_name`
+alone.
+
 ## Capability enforcement
 
 Before any `ToolFacade` call, `GatewaySession._check_capability()`
-verifies the requested operation is actually advertised by
-`capabilities()` for the current scenario, derived from the same
-adapter-visible `ScenarioView.plan` capability discovery reads:
+verifies the requested operation exactly matches an `OperationDescriptor`
+this scenario advertises:
 
-- a `write` request's `tool_name` must be one of the scenario's
-  advertised `write` operations, under the advertised `namespace`;
-- a `compensate` request's `tool_name` must be one of the scenario's
-  advertised `compensate` operations, under the advertised `namespace` —
-  **write and compensate tools are never interchangeable**: a tool
-  advertised only as `compensate` is rejected if sent as `write`, and
-  vice versa;
-- a `read` request's `namespace` must be scenario-visible (referenced by
-  some step of the plan);
-- an unadvertised or mismatched combination is a gateway-level
+- a `write` request's `(tool_name, namespace, resource_id)` must match an
+  advertised `write` descriptor;
+- a `compensate` request's `(tool_name, namespace, resource_id)` must
+  match an advertised `compensate` descriptor — **write and compensate
+  tools are never interchangeable**: a tool advertised only under
+  `compensate` is rejected if sent as `write`, and vice versa, even when
+  `namespace`/`resource_id` are otherwise correct;
+- a `read` request's `(namespace, resource_id)` must be scenario-visible
+  — visible if *any* operation (read, write, or compensate) targets that
+  exact resource, since a well-behaved candidate reads a resource before
+  acting on it;
+- a resource can be visible for one operation and not another: e.g. a
+  resource targeted only by a `write` step is read-and-write-visible but
+  not compensate-visible, and a request for the missing operation is
+  rejected even though the resource is otherwise real (see
+  `tests/contract/test_gateway_capability_enforcement.py::test_resource_visible_for_one_operation_but_not_another_is_enforced_per_operation`);
+  an unadvertised or mismatched combination — including a real tool
+  against the wrong `resource_id` — is a gateway-level
   `capability_violation` rejection — zero `ToolFacade` calls, exactly
   like a malformed envelope.
 
@@ -104,12 +135,32 @@ never consults `ScenarioOracle` and never judges whether an operation
 *should* succeed, only whether it is a shape the scenario advertises at
 all.
 
+## Capability discovery is logged (GPI-FR-009)
+
+`GatewaySession.discover_capabilities()` — what `GET /capabilities`
+actually calls — returns the same advertisement `capabilities()` always
+returns for this session (computed once and cached, since the underlying
+`ScenarioView` is immutable for the session's lifetime) and records that
+exact advertisement in the session log on every call. Repeated discovery
+is therefore deterministic by construction: every logged
+`advertisement` is byte-identical, while each call still produces its
+own log entry, so an auditor can see exactly how many times — and when —
+a candidate asked. The logged entry carries the session ID, scenario ID,
+envelope version, and the full operations list (actions, tool names,
+namespaces, and resource IDs where applicable); it never carries the
+session's run token (capability advertisements never include it) and
+never carries oracle content (the advertisement is derived only from
+`ScenarioView`) — see
+`tests/contract/test_gateway_capability_discovery.py`.
+
 ## Components
 
 | Component | Module | Responsibility |
 |---|---|---|
 | Envelope | `cavbench.gateway.envelope` | The common request/response envelope; schema validation. |
-| Gateway core | `cavbench.gateway.core` | Session binding, capability enforcement, the request-to-attempt mapping, response normalization, capability advertisement, finalize intake. |
+| Capability model | `cavbench.gateway.capabilities` | The canonical scenario-visible operation model (`derive_operations`), shared by advertisement and enforcement. |
+| Gateway core | `cavbench.gateway.core` | Session binding, capability enforcement, the request-to-attempt mapping, response normalization, capability advertisement + logged discovery, finalize intake. |
+| Bind validation | `cavbench.gateway.bind` | Rejects any non-loopback REST bind address before a socket opens. |
 | Redaction | `cavbench.gateway.redaction` | Strips run tokens/secrets from anything recorded. |
 | Session log | `cavbench.gateway.session_log` | Redacted, append-only record of every wire exchange (including gateway-level rejections). |
 | REST frontend | `cavbench.gateway.rest` | Standard-library `http.server` HTTP mapping of the envelope, loopback-only. |

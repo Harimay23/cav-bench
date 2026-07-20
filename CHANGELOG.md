@@ -18,12 +18,26 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   writing a Python `ExecutionAdapter`: the candidate is the protocol
   client; the gateway is the protocol server; `ToolFacade` and
   `BenchmarkEnvironment` remain the sole effect executor and sole commit
-  authority, unchanged. One well-formed, authenticated candidate request
-  maps to exactly one `ToolFacade` invocation; a malformed or
-  unauthenticated request creates zero benchmark attempts. Adds: the
+  authority, unchanged. Every accepted tool-operation request maps to
+  exactly one `ToolFacade` invocation; final-report submission is an
+  accepted non-tool request and maps to zero `ToolFacade` invocations by
+  design; a malformed envelope, an authentication failure, or a
+  **capability violation** creates zero benchmark attempts. Every
+  candidate request is checked, before any `ToolFacade` call, against one
+  canonical scenario-visible capability model
+  (`cavbench.gateway.capabilities.derive_operations`, shared by
+  advertisement and enforcement so the two cannot diverge) at the full
+  `(action, tool_name, namespace, resource_id)` level — write and
+  compensate tools are never interchangeable, and a resource visible for
+  one operation is not automatically visible for another. Capability
+  discovery (`GET /capabilities`) returns a frozen advertisement and
+  records it in the session log on every call (GPI-FR-009). Adds: the
   common protocol envelope (`cavbench.gateway.envelope`, schema at
   `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
-  neutral gateway core (`cavbench.gateway.core`); redaction and a
+  neutral gateway core (`cavbench.gateway.core`); the capability model
+  (`cavbench.gateway.capabilities`); loopback-only REST bind validation
+  (`cavbench.gateway.bind`, rejects `0.0.0.0`/`::`/LAN addresses/non-
+  loopback hostnames before a socket opens); redaction and a
   redacted session log (`cavbench.gateway.redaction`,
   `cavbench.gateway.session_log`); a standard-library-only REST frontend
   (`cavbench.gateway.rest`, no new runtime dependency); a deterministic

@@ -78,6 +78,12 @@ Content-Type: application/json
 
 ## Capability discovery response shape
 
+Resource-scoped operations (`read`, `write`, `compensate`) are advertised
+at the `(action, tool_name, namespace, resource_id)` level — the same
+descriptors `cavbench.gateway.capabilities.derive_operations` produces and
+`_check_capability()` enforces against (`docs/program/gateway/architecture.md`
+"One canonical capability model"):
+
 ```json
 {
   "envelope_version": "1.0",
@@ -86,12 +92,12 @@ Content-Type: application/json
   "scenario_title": "Order ships between read and cancellation",
   "toolset": ["cancel_order"],
   "operations": [
-    {"action": "read", "description": "..."},
     {"action": "status_check", "description": "..."},
     {"action": "escalate", "description": "..."},
     {"action": "clarify", "description": "..."},
     {"action": "report", "description": "..."},
-    {"action": "write", "tool_name": "cancel_order", "namespace": "order", "description": "..."}
+    {"action": "read", "namespace": "order", "resource_id": "O-2001", "description": "..."},
+    {"action": "write", "tool_name": "cancel_order", "namespace": "order", "resource_id": "O-2001", "description": "..."}
   ]
 }
 ```
@@ -99,3 +105,8 @@ Content-Type: application/json
 Derived only from the adapter-visible `ScenarioView` (the same view an
 `ExecutionAdapter` sees) — never from the scenario oracle. See
 `tests/contract/test_gateway_neutrality.py::test_capability_discovery_leaks_no_oracle_content`.
+
+`GET /capabilities` calls `GatewaySession.discover_capabilities()`, which
+returns this same frozen advertisement every time and records it in the
+session log on each call (GPI-FR-009) — see
+`tests/contract/test_gateway_capability_discovery.py`.
