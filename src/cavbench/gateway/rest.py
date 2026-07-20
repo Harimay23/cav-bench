@@ -73,7 +73,7 @@ def make_handler(session: GatewaySession) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib hook name
             if self.path == "/capabilities":
-                _write_json(self, HTTPStatus.OK, session.capabilities())
+                _write_json(self, HTTPStatus.OK, session.discover_capabilities())
                 return
             if self.path.startswith("/operations/"):
                 operation_id = self.path[len("/operations/") :]

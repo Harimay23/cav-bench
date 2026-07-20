@@ -93,6 +93,27 @@ class GatewaySessionLog:
         self.entries.append(entry)
         return entry
 
+    def record_discovery(self, *, advertisement: dict[str, Any]) -> SessionLogEntry:
+        """Record one capability-discovery call (GPI-FR-009). Never a
+        `ToolFacade` call. `advertisement` is exactly what was returned to
+        the candidate, so this entry's `detail.advertisement` equals the
+        wire response byte-for-byte (after redaction, which is a no-op
+        here since capability advertisements never carry a run token or
+        oracle content by construction)."""
+        entry = SessionLogEntry(
+            seq=self._seq,
+            kind="discovery",
+            action="discover_capabilities",
+            correlation_id=None,
+            operation_id=None,
+            normalized_status=None,
+            tool_facade_call=False,
+            detail=redact({"advertisement": advertisement}),
+        )
+        self._seq += 1
+        self.entries.append(entry)
+        return entry
+
     def tool_facade_call_count(self) -> int:
         return sum(1 for entry in self.entries if entry.tool_facade_call)
 
