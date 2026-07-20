@@ -103,6 +103,26 @@ across both actions; what actually makes them non-interchangeable is
 that enforcement matches on the full descriptor, not on `tool_name`
 alone.
 
+**Implicit read rule.** A prior review found that read *advertisement*
+and read *enforcement* could diverge: `capabilities()` listed a `read`
+descriptor only for explicit `read`-kind plan steps, while enforcement
+separately allowed reading any resource touched by *any* resource-scoped
+step. A request could be accepted with no equivalent line in
+`/capabilities`. Fixed by making the implicit-read rule part of
+derivation itself, not a second enforcement-only allowlist:
+`derive_operations` synthesizes exactly one `read` descriptor for every
+unique `(namespace, resource_id)` referenced by *any* resource-scoped
+step (`read`, `write`, or `compensate`) — deduplicated by
+`(action="read", namespace, resource_id)` — because a well-behaved
+candidate reads a resource before writing or compensating it, exactly as
+the reference candidate and every baseline profile do. These synthesized
+descriptors are the *only* source of read visibility: `capabilities()`
+advertises them and `_check_capability()` enforces against them,
+identically, because both read from the same `derive_operations` result
+(see `tests/contract/test_gateway_capability_consistency.py`, which
+proves the two directions generically across several scenarios rather
+than a single hand-picked case).
+
 ## Capability enforcement
 
 Before any `ToolFacade` call, `GatewaySession._check_capability()`
@@ -116,10 +136,9 @@ this scenario advertises:
   tools are never interchangeable**: a tool advertised only under
   `compensate` is rejected if sent as `write`, and vice versa, even when
   `namespace`/`resource_id` are otherwise correct;
-- a `read` request's `(namespace, resource_id)` must be scenario-visible
-  — visible if *any* operation (read, write, or compensate) targets that
-  exact resource, since a well-behaved candidate reads a resource before
-  acting on it;
+- a `read` request's `(namespace, resource_id)` must match one of the
+  synthesized `read` descriptors from `derive_operations` (see "Implicit
+  read rule" above) — the identical set `capabilities()` advertised;
 - a resource can be visible for one operation and not another: e.g. a
   resource targeted only by a `write` step is read-and-write-visible but
   not compensate-visible, and a request for the missing operation is
@@ -152,6 +171,30 @@ session's run token (capability advertisements never include it) and
 never carries oracle content (the advertisement is derived only from
 `ScenarioView`) — see
 `tests/contract/test_gateway_capability_discovery.py`.
+
+### Immutability of the advertisement and the log
+
+A prior review also found that `capabilities()`/`discover_capabilities()`
+returned the *same* cached mutable `dict` on every call, and that
+`SessionLogEntry.to_dict()` only shallow-copied its top level — a caller
+mutating a nested container (e.g.
+`entry.to_dict()["detail"]["advertisement"]["operations"][0]`) could
+corrupt the stored entry, and mutating what one `discover_capabilities()`
+call returned could corrupt every later call's response.
+
+Fixed with a defensive deep-copy snapshot model:
+`GatewaySession._canonical_advertisement()` builds and caches the
+advertisement exactly once, privately — no caller ever receives that
+object. `capabilities()` and `discover_capabilities()` each return
+`copy.deepcopy(canonical)`, and `discover_capabilities()` separately
+deep-copies again before handing a third independent copy to
+`GatewaySessionLog.record_discovery()`. `SessionLogEntry.to_dict()` now
+deep-copies `detail` on every call, so the object it returns shares no
+mutable container with the entry it was built from. Net effect: mutating
+anything returned by `capabilities()`, `discover_capabilities()`, or
+`SessionLogEntry.to_dict()` can never reach the internal canonical model,
+any other call's return value, or any already-recorded log entry — see
+`tests/contract/test_gateway_capability_immutability.py`.
 
 ## Components
 

@@ -29,9 +29,20 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   advertisement and enforcement so the two cannot diverge) at the full
   `(action, tool_name, namespace, resource_id)` level — write and
   compensate tools are never interchangeable, and a resource visible for
-  one operation is not automatically visible for another. Capability
-  discovery (`GET /capabilities`) returns a frozen advertisement and
-  records it in the session log on every call (GPI-FR-009). Adds: the
+  one operation is not automatically visible for another. Read
+  visibility is derived, not separately enforced: `derive_operations`
+  synthesizes exactly one `read` descriptor per unique
+  `(namespace, resource_id)` touched by any resource-scoped step (read,
+  write, or compensate), so read advertisement and read enforcement are
+  definitionally identical — proved generically across several scenarios
+  by `tests/contract/test_gateway_capability_consistency.py`. Capability
+  discovery (`GET /capabilities`) returns an independent deep-copy
+  snapshot of a frozen advertisement and records an independent
+  deep-copy of it in the session log on every call (GPI-FR-009);
+  `capabilities()`, `discover_capabilities()`, and
+  `SessionLogEntry.to_dict()` all return fresh, fully independent
+  copies, so mutating a returned object can never affect a later call, a
+  prior log entry, or the internal canonical model. Adds: the
   common protocol envelope (`cavbench.gateway.envelope`, schema at
   `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
   neutral gateway core (`cavbench.gateway.core`); the capability model
