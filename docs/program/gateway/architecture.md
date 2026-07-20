@@ -251,30 +251,55 @@ trace across those runs.
 
 `GatewayRestServer` lifecycle states: `created -> running -> stopped`,
 protected by one lock so competing `start()`/`stop()` calls serialize
-deterministically instead of racing. Two issues surfaced across review:
+deterministically instead of racing. Three issues surfaced across
+review:
 
 1. **`stop()` before `start()` hung.** `socketserver.TCPServer.__init__`
    (transitively, `HTTPServer.__init__`) already binds and listens on
-   the socket — so it exists even if `serve_forever()` was never
-   started — while `HTTPServer.shutdown()` blocks waiting for a
-   `serve_forever()` loop iteration that will never happen if the loop
-   was never running.
+   the socket — so it exists even if the server loop was never started —
+   while `HTTPServer.shutdown()` blocks waiting for a `serve_forever()`
+   loop iteration that will never happen if the loop was never running.
 2. **A startup race.** `start()` launched the server thread and returned
-   immediately, without proving `serve_forever()` had actually reached
-   its loop. An immediate `stop()` could therefore call `shutdown()`
-   before it was safe to — the same hang as (1), just reachable through
-   `start()` returning too early rather than never being called at all.
+   immediately, without proving the loop had actually reached its body.
+   An immediate `stop()` could therefore call `shutdown()` before it was
+   safe to — the same hang as (1), just reachable through `start()`
+   returning too early rather than never being called at all.
+3. **Startup-timeout cleanup didn't prove the thread had actually
+   stopped.** The first fix to (2) closed the socket on a startup
+   timeout but never confirmed the already-launched thread had
+   terminated, and the tests exercising it replaced
+   `GatewayRestServer._httpd` *after* `__init__` had already bound the
+   original server's socket — leaking it.
 
-Both are closed by `_HandshakingHTTPServer`, a thin `HTTPServer`
-subclass that overrides the documented `service_actions()` extension
-point (called once per `serve_forever()` loop iteration, always *after*
-that iteration's `select()` call) to signal a `threading.Event` the
-first time it fires — the earliest point at which "the loop is actually
-running" is provably true, not just "the thread was scheduled." `start()`
-now blocks on that event (bounded by a startup timeout) before
-returning, so `_state` never becomes `"running"` until `serve_forever()`
-has genuinely begun; `stop()` only calls `shutdown()` when `_state` says
-`"running"`, so it can never race ahead of an unconfirmed startup.
+All three are closed by abandoning `serve_forever()`/`shutdown()`
+entirely. `_ManagedHTTPServer.run()` is a loop over the public,
+documented `handle_request()` primitive (one request, or a
+`self.timeout`-bounded no-op if none arrives), cancelled via an
+always-safe-to-signal `threading.Event` (`request_cancellation()`)
+rather than `serve_forever()`'s private shutdown handshake — signaling
+it is never itself a blocking or racy operation, unlike
+`HTTPServer.shutdown()`. `running_confirmed` is set as the first
+statement inside `run()`, which — because it necessarily executes on the
+server thread — is authoritative proof the loop has actually started.
+`start()` blocks on that event (bounded by a startup timeout) before
+returning, so `_state` never becomes `"running"` until the loop has
+genuinely begun.
+
+One internal `GatewayRestServer._cleanup()` implements the full
+signal-join-close sequence exactly once: request cancellation (always
+safe), join the server thread with a bounded timeout, and close the
+socket exactly once (guarded by a flag independent of `_state`, so
+repeated calls — including a `stop()` after a startup failure already
+ran its own cleanup — never double-close). It returns whether the
+thread was actually confirmed dead. `start()`'s timeout path and
+`stop()` both call it — there is exactly one place that can leak a
+thread or a socket, and every lifecycle test exercises it. If cleanup's
+own bounded join cannot confirm the thread terminated (only reachable
+under a pathological server that ignores cancellation), `start()` raises
+a distinct `ServerLifecycleError` stating startup failed *and* the
+server thread could not be terminated, rather than silently claiming a
+teardown that did not happen.
+
 Because `start()` and `stop()` hold the same lock for their entire call
 (including any bounded wait), a `stop()` arriving mid-startup simply
 blocks until `start()` finishes resolving to a definite state first —
@@ -282,21 +307,33 @@ there is no window in which either method observes or acts on an
 ambiguous "maybe running" state.
 
 Net behavior: `stop()` before `start()` only closes the listening
-socket, never calls `shutdown()`, and returns immediately; `start()`
-while already running is an idempotent no-op; `start()` after `stop()`
-raises `cavbench.gateway.errors.ServerLifecycleError`; a `start()` whose
-startup handshake times out tears the server down and raises the same
-error rather than leaving it ambiguous; `stop()` is idempotent and calls
-`server_close()` exactly once regardless of how many times it is called.
-Normal `with GatewayRestServer(session) as server:` use is unaffected,
-including cleanup after an exception inside the block. See
+socket and returns immediately; `start()` while already running is an
+idempotent no-op; `start()` after `stop()` (including after a startup
+failure, which also transitions to the terminal `stopped` state) raises
+`cavbench.gateway.errors.ServerLifecycleError`; `stop()` is idempotent
+and calls `server_close()` exactly once regardless of how many times it
+is called, including after a startup-failure cleanup already ran. Normal
+`with GatewayRestServer(session) as server:` use is unaffected,
+including cleanup after an exception inside the block.
+
+Test-server injection uses a private `_server_class` constructor
+parameter (never a post-construction attribute swap), so a test double
+is installed *before* any socket is bound and the real default server is
+never separately constructed, let alone leaked. See
 `tests/unit/test_gateway_rest_lifecycle.py`, which bounds every risky
 call with a daemon-thread timeout helper (so a regression that
 reintroduces a hang fails the test loudly instead of hanging the suite)
-and covers rapid repeated start/stop cycles, competing threads calling
-`start()`/`stop()` simultaneously, `stop()` arriving mid-startup, a
-simulated startup timeout, and confirming no server thread or listening
-socket survives `stop()`.
+and covers: rapid repeated start/stop cycles; competing threads calling
+`start()`/`stop()` simultaneously; `stop()` arriving mid-startup
+(synchronized via an `Event`, not a sleep); a simulated startup timeout
+that leaves no live server thread; `stop()` after a startup failure
+being harmless and repeatable without a second `server_close()` call;
+startup-failure cleanup completing within a bounded timeout; the honest
+"could not be terminated" report when cleanup's own join cannot confirm
+termination; ten repeated startup-failure runs compared against the
+process's live-thread set before and after, proving none accumulate; and
+that injecting a test server never leaks a separately-constructed
+default one.
 
 ## Components
 

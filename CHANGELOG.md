@@ -63,17 +63,26 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   report submission cannot race a consequential operation, deterministic
   final benchmark state across repeated concurrent runs without claiming
   a reproducible ordered trace). Server lifecycle
-  (`created -> running -> stopped`) is now deterministic and idempotent,
-  including closing a startup race where `start()` could previously
-  return before `serve_forever()` had actually begun running: `start()`
-  now blocks (bounded) until a `service_actions()`-based handshake
-  confirms the server loop is genuinely active, and `start()`/`stop()`
-  share one lock so competing calls from different threads resolve
-  deterministically instead of racing. `stop()` before `start()` no
-  longer hangs, `start()` while running is a no-op, `start()` after
-  `stop()` raises `ServerLifecycleError`, and `stop()`/`server_close()`
-  are safe to call repeatedly (`tests/unit/test_gateway_rest_lifecycle.py`).
-  Adds: the
+  (`created -> running -> stopped`) is now deterministic and idempotent.
+  `GatewayRestServer` no longer uses `serve_forever()`/`shutdown()`:
+  `_ManagedHTTPServer.run()` loops over the public `handle_request()`
+  primitive, cancelled via an always-safe-to-signal `threading.Event`
+  rather than `serve_forever()`'s private shutdown handshake. `start()`
+  blocks (bounded) until the loop confirms it is genuinely active before
+  returning, and `start()`/`stop()` share one lock so competing calls
+  from different threads resolve deterministically instead of racing.
+  One internal cleanup routine -- signal cancellation, join the thread
+  with a bounded timeout, close the socket exactly once -- backs both a
+  startup-timeout failure and a normal `stop()`, and proves the thread
+  actually terminated rather than assuming it did; if it cannot confirm
+  termination within the bound, `start()` raises a distinct error naming
+  both failures. `stop()` before `start()` no longer hangs, `start()`
+  while running is a no-op, `start()` after `stop()` (including after a
+  startup failure) raises `ServerLifecycleError`, and
+  `stop()`/`server_close()` are safe to call repeatedly
+  (`tests/unit/test_gateway_rest_lifecycle.py`, including repeated
+  startup-failure runs checked against the process's live-thread set for
+  leaks). Adds: the
   common protocol envelope (`cavbench.gateway.envelope`, schema at
   `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
   neutral gateway core (`cavbench.gateway.core`); the capability model
