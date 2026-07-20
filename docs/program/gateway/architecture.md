@@ -205,7 +205,7 @@ any other call's return value, or any already-recorded log entry — see
 | Gateway core | `cavbench.gateway.core` | Session binding, capability enforcement, the request-to-attempt mapping, response normalization, capability advertisement + logged discovery, finalize intake. |
 | Bind validation | `cavbench.gateway.bind` | Rejects any non-loopback REST bind address before a socket opens. |
 | Redaction | `cavbench.gateway.redaction` | Strips run tokens/secrets from anything recorded. |
-| Session log | `cavbench.gateway.session_log` | Redacted, append-only record of every wire exchange (including gateway-level rejections). |
+| Session log | `cavbench.gateway.session_log` | Redacted, genuinely append-only record of every wire exchange (including gateway-level rejections). Internal storage is private; `record_request`/`record_rejection`/`record_discovery` are the only append paths; the public `entries` property and `to_list()` both return fresh defensive copies, so a caller can never clear, append to, reorder, or mutate the stored log (see `tests/unit/test_gateway_session_log.py`). |
 | REST frontend | `cavbench.gateway.rest` | Standard-library `http.server` HTTP mapping of the envelope, loopback-only. |
 | Reference candidate | `examples.reference_candidate` | Deterministic scripted test-subject client — a fixture, never part of the gateway. |
 

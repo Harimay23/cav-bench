@@ -42,7 +42,12 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   `capabilities()`, `discover_capabilities()`, and
   `SessionLogEntry.to_dict()` all return fresh, fully independent
   copies, so mutating a returned object can never affect a later call, a
-  prior log entry, or the internal canonical model. Adds: the
+  prior log entry, or the internal canonical model. The session log is
+  genuinely append-only: internal storage is private, the only append
+  paths are `record_request`/`record_rejection`/`record_discovery`, and
+  the public `entries` property and `to_list()` return fresh defensive
+  copies, so a caller can never clear, append to, reorder, or mutate
+  what is actually stored. Adds: the
   common protocol envelope (`cavbench.gateway.envelope`, schema at
   `src/cavbench/gateway/schemas/envelope.schema.json`); the transport-
   neutral gateway core (`cavbench.gateway.core`); the capability model
