@@ -213,10 +213,12 @@ def _write_step(
 ) -> tuple[str, FixtureState]:
     """Issues one consequential write through the tool facade.
 
-    The returned status is the environment's own response
-    (COMMITTED/CONFLICT/AMBIGUOUS/IDEMPOTENT_REPLAY/FAILED) -- the only
-    admissible attempted-vs-committed evidence. A node's control flow having
-    "succeeded" proves nothing about whether an effect committed.
+    The returned ``ToolResult`` is the adapter-visible response used for
+    control flow. Authoritative attempt and commit truth remains in
+    ``BenchmarkEnvironment``'s canonical trace and side-effect ledger.
+    ``COMMITTED`` permits an immediate adapter-visible confirmation;
+    ``AMBIGUOUS`` establishes neither outcome, and ``IDEMPOTENT_REPLAY``
+    indicates deduplication rather than a new commit by this invocation.
     """
     assert step.namespace is not None and step.resource_id is not None
     assert step.tool_name is not None and step.logical_operation_id is not None
@@ -241,7 +243,14 @@ def _write_step(
             "status": result.status,
         }
     ]
-    if result.status in ("COMMITTED", "IDEMPOTENT_REPLAY"):
+    if result.status == "COMMITTED":
+        # Only a fresh COMMITTED response from *this* write is reported as
+        # effect_committed. IDEMPOTENT_REPLAY means the environment
+        # deduplicated against an already-committed effect -- it is not a
+        # new commit by this invocation, and must be reconciled via an
+        # explicit status_check, not treated as effect_committed here.
+        # AMBIGUOUS establishes neither outcome and must not be reported as
+        # committed at all.
         entries.append(
             {
                 "event_type": "effect_committed",
@@ -347,10 +356,55 @@ def fa02_read_state(state: FixtureState) -> FixtureState:
 
 
 def fa02_commit_refund(state: FixtureState) -> FixtureState:
+    """Reconciles via a stable-key status check immediately before every
+    possible write -- inside this node, on every invocation, not in a
+    separate node that runs only once before it.
+
+    A separate preceding reconciliation node is not sufficient: a
+    checkpoint could be persisted after that node runs, this node could
+    then externally commit the write, and the process could crash before
+    *this node's own return value* is checkpointed. Resuming from that
+    checkpoint re-invokes this node directly -- the separate node never
+    runs again -- so a version that only reconciled before entering this
+    node would blindly reissue the write against an operation that already
+    committed. Performing the status check here, first, on every
+    invocation (including the very first), is what closes that gap.
+    """
     step = _scenario().plan.step("write-1")
-    _, idempotency_key = stable_identifiers(step)
+    operation_id, idempotency_key = stable_identifiers(step)
+
+    precheck = _session().tools.status_check(idempotency_key=idempotency_key)
+    events = _events(
+        state,
+        {
+            "event_type": "effect_reconciled",
+            "operation_id": operation_id,
+            "status": precheck.status,
+            "phase": "pre_write",
+        },
+    )
+
+    if precheck.status == "COMMITTED":
+        # A prior invocation of this node already committed the effect, but
+        # its own return value was never checkpointed (e.g. a crash between
+        # the external commit and LangGraph persisting this node's
+        # result). The operation is already reconciled: do not write
+        # again, and do not fabricate effect_attempted/effect_committed
+        # diagnostics for a write that never happened this invocation.
+        return {"ack_status": "COMMITTED", "normalized_events": events}
+
+    if precheck.status != "NOT_FOUND":
+        # status_check() only ever returns COMMITTED or NOT_FOUND today
+        # (src/cavbench/runtime/environment.py); this branch exists so an
+        # unrecognized status is never treated as safe to write against --
+        # it routes to escalation, not a blind write.
+        return {"ack_status": precheck.status, "normalized_events": events}
+
     status, update = _write_step(
-        state, step, expected_version=_observed_version(state, step), idempotency_key=idempotency_key
+        {**state, "normalized_events": events},
+        step,
+        expected_version=_observed_version(state, step),
+        idempotency_key=idempotency_key,
     )
     update["ack_status"] = status
     update["commit_attempts"] = state.get("commit_attempts", 0) + 1
@@ -359,9 +413,9 @@ def fa02_commit_refund(state: FixtureState) -> FixtureState:
 
 def fa02_route_after_commit(state: FixtureState) -> str:
     status = state.get("ack_status", "")
-    if status in ("COMMITTED", "IDEMPOTENT_REPLAY"):
+    if status == "COMMITTED":
         return "confirm"
-    if status == "AMBIGUOUS":
+    if status in ("AMBIGUOUS", "IDEMPOTENT_REPLAY"):
         return "reconcile"
     return "escalate"
 
@@ -392,7 +446,7 @@ def fa02_route_after_reconcile(state: FixtureState) -> str:
 def fa02_confirm(state: FixtureState) -> FixtureState:
     return {
         "completion_status": "success",
-        "final_message": "Refund committed exactly once (ambiguous acknowledgement reconciled by status check).",
+        "final_message": "Refund committed exactly once (reconciled by status check before any duplicate write).",
     }
 
 

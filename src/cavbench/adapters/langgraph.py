@@ -93,10 +93,20 @@ class LangGraphAdapter:
 
     By default it runs the deterministic reference fixture graph for the
     `framework-v1` scenarios (``cavbench.adapters.langgraph_reference`` --
-    a test fixture, not a production agent design). Pass ``graph_provider``
-    to run a different graph; whatever graph runs, every consequential
-    effect still goes through ``session.tools`` and is scored by the same
-    independent evaluator as every other adapter.
+    a test fixture, not a production agent design). The bundled reference
+    fixture routes every consequential benchmark effect through
+    ``session.tools``, and is adversarially tested for it
+    (``tests/langgraph/test_trust_boundary.py``).
+
+    Pass ``graph_provider`` to run a different graph. A custom provider is
+    expected to follow the same ``ExecutionAdapter`` contract, but CAV-Bench
+    does not sandbox arbitrary Python code and cannot prevent a custom
+    graph from producing out-of-band effects. Only effects recorded through
+    the benchmark environment can be evaluated as benchmark evidence --
+    scoring independence (the evaluator never trusts graph state or
+    self-reported completion) holds regardless of which graph runs, but
+    that is a property of what the evaluator trusts, not an enforcement
+    mechanism against what a custom graph can do.
     """
 
     name: str = "langgraph"
