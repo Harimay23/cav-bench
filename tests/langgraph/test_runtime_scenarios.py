@@ -104,13 +104,18 @@ def test_stale_state_scenario_second_timing_variant_relies_on_the_atomic_guard()
 
 
 def test_ambiguous_retry_scenario_reconciles_with_exactly_one_commit() -> None:
+    """The guarded write node reconciles with a stable-key status check
+    both before the write (NOT_FOUND) and after the ambiguous
+    acknowledgement (COMMITTED) -- see docs/langgraph-adapter-mapping.md's
+    reconciliation-inside-the-write-node design."""
     trace, evaluation = run_reference_episode("FA-02", "guarded")
 
     commits = events_of(trace, "side_effect_commit")
     status_reads = events_of(trace, "operation_status_read")
     assert len(commits) == 1
-    assert len(status_reads) == 1
-    assert status_reads[0].seq > commits[0].seq, "reconciliation must follow the ambiguous commit"
+    assert [e.response_status for e in status_reads] == ["NOT_FOUND", "COMMITTED"]
+    assert status_reads[0].seq < commits[0].seq, "the pre-write status check must precede the commit"
+    assert status_reads[1].seq > commits[0].seq, "the post-ambiguous status check must follow the commit"
     assert len(trace.side_effects) == 1
     assert evaluation.dimensions["execution_integrity"] == "pass"
     assert evaluation.dimensions["outcome_recoverability"] == "pass"
