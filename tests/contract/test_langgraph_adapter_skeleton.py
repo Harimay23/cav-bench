@@ -61,3 +61,28 @@ def test_langgraph_adapter_run_fails_clearly_instead_of_fabricating_a_result() -
 
     message = str(exc_info.value)
     assert message, "the raised error must carry a clear, non-empty explanation"
+
+
+def test_langgraph_adapter_run_raises_not_implemented_once_langgraph_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Isolates the "graph not implemented yet" failure mode from the
+    "langgraph isn't installed" failure mode: even with the installation
+    check stubbed out (as if langgraph were available), run() must still
+    fail honestly with NotImplementedError, and the message must clearly
+    say the graph is not implemented yet -- not just raise something."""
+    import cavbench.adapters.langgraph as langgraph_adapter_module
+
+    monkeypatch.setattr(langgraph_adapter_module, "_ensure_langgraph_installed", lambda: None)
+
+    scenario = PACK.get("HP-01")
+    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-skeleton-test-not-implemented")
+    session = AdapterSession(scenario.view, ToolFacade(env))
+
+    adapter = langgraph_adapter_module.LangGraphAdapter()
+    with pytest.raises(NotImplementedError) as exc_info:
+        adapter.run(session)
+
+    message = str(exc_info.value).lower()
+    assert "graph" in message
+    assert "no graph implementation yet" in message

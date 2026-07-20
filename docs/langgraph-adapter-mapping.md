@@ -60,15 +60,79 @@ this is out of scope for the design-stage skeleton.
 | Normalized event (`docs/framework-adapter-brief.md`) | LangGraph evidence |
 |---|---|
 | `intent_recorded` | The initial input written into graph/thread state before the first node runs. |
-| `authority_checked` | An explicit, externally observable authorization decision — preferably a human-in-the-loop interrupt resolved through `Command(resume=...)`, or a benchmark/facade-recorded authorization check. An internal node output or an "is authorized" branch may provide context but is **not**, on its own, independently trusted authorization evidence. |
+| `authority_checked` | An explicit, externally observable authorization decision point — typically an `interrupt()` / `Command(resume=...)` step. This makes the decision *observable*; it is **not itself authorization truth**. See [Authority: observability versus truth](#authority-observability-versus-truth). |
 | `state_read` | A node's read via a CAV-Bench tool call (`session.tools.read(...)`), captured in that node's output. |
-| `state_revalidated` | A node that re-reads state immediately before a commit-issuing node, comparing against the last checkpointed observation. |
-| `effect_attempted` | `on_tool_start` from `astream_events`, or equivalent task-stream evidence (e.g. `stream_mode="tasks"`), emitted immediately before the consequential facade/tool call. Entering a graph node alone is **not** sufficient evidence: a node may run and exit without ever invoking a consequential tool. |
-| `effect_committed` | The `ToolResult` returned by `session.tools.write(...)` — CAV-Bench's own environment-produced truth, not a LangGraph-reported fact (see [Trust boundary](#trust-boundary) and [Attempted vs. committed](#attempted-versus-committed-limitation)). |
-| `effect_reconciled` | A node that calls `session.tools.status_check(...)` with the same stable `idempotency_key`, run when resuming from a checkpoint after an interrupted or ambiguous prior attempt. |
+| `state_revalidated` | A node that re-reads state and semantically re-evaluates the action immediately before a commit-issuing node. See [Stale-state TOCTOU protection](#stale-state-toctou-protection) — this alone does not close the race. |
+| `effect_attempted` | Authoritative only when recorded synchronously at `session.tools.write(...)` (`ToolFacade.write()`) entry, before `BenchmarkEnvironment` applies the effect. `on_tool_start`/`astream_events` and task-stream (`stream_mode="tasks"`) evidence are *corroborating ordering evidence only* — see [Evidence spine](#evidence-spine-attempted-versus-committed). |
+| `effect_committed` | Authoritative only when derived from the `ToolResult` / `BenchmarkEnvironment` result returned by that same `session.tools.write(...)` call — never from a LangGraph-reported fact. See [Trust boundary](#trust-boundary) and [Evidence spine](#evidence-spine-attempted-versus-committed). |
+| `effect_reconciled` | A node that calls `session.tools.status_check(...)` with the same stable operation identity, performed **unconditionally** before any retry — see [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
 | `compensation_started` / `compensation_completed` | A dedicated compensation node, reached via a conditional edge when a downstream node reports failure. |
 | `escalation_created` | A node calling `session.escalate(...)`, optionally surfaced to a human via LangGraph's `interrupt()` / human-in-the-loop mechanism. |
 | `outcome_reported` | The graph's terminal node output, mapped to `AdapterResult.completion_status` — untrusted, exactly as for every other adapter. |
+
+## Evidence spine: attempted versus committed
+
+The **single authoritative evidence spine** for both `effect_attempted` and
+`effect_committed` is the adapter's own call into the tool facade — never
+anything LangGraph observes about itself:
+
+- `effect_attempted` is authoritative **only** when recorded synchronously
+  at `ToolFacade.write()` entry, before `BenchmarkEnvironment` applies the
+  effect.
+- `effect_committed` is authoritative **only** when derived from the
+  `ToolResult` / `BenchmarkEnvironment` result returned by that same call.
+
+`on_tool_start` (from `astream_events`) and task-stream events
+(`stream_mode="tasks"`) are **corroborating ordering evidence only** —
+useful for reconstructing *when* things happened relative to each other,
+never a substitute for the two facts above. This is load-bearing, not
+cautious phrasing, for two reasons:
+
+- **A plain graph node that calls `session.tools.write(...)` directly (not
+  through a LangChain-wrapped `Tool`) may emit no `on_tool_start` event at
+  all.** LangChain's callback instrumentation fires for `Runnable`/`Tool`
+  invocations; an ordinary Python function call inside a node body is
+  invisible to it. An adapter that waited for `on_tool_start` before
+  considering an effect attempted could simply never see one.
+- **Task streams and tool streams are different granularities that do not
+  generally coincide.** `stream_mode="tasks"` emits one event per graph
+  task/node; `astream_events` emits events per instrumented `Runnable`,
+  which can be finer-grained than node boundaries (a single node could wrap
+  zero, one, or several instrumented tools). These two granularities line
+  up 1:1 **only because the reference fixture deliberately enforces exactly
+  one consequential action per node** (see
+  [Fine-grained node boundaries](#fine-grained-node-boundaries)) — that is
+  a property of the fixture's design, not a general LangGraph guarantee.
+
+This document does **not** specify a complete runtime normalized-event
+emission mechanism — deciding exactly which LangGraph callback/stream hooks
+the adapter subscribes to, and how it correlates them with tool-facade
+calls into the normalized event stream, is out of scope for this
+design-stage PR. It is recorded as a required item under
+[Next implementation milestones](#next-implementation-milestones).
+
+## Authority: observability versus truth
+
+`interrupt()` and `Command(resume=...)` make an authorization decision
+**externally observable** — a human or a scripted process can see the
+decision point and provide a response. They do **not** make that response
+authorization truth:
+
+- The resume payload is **adapter/harness input**, exactly like any other
+  value a node receives — it carries no more trust than an argument the
+  graph was called with.
+- **Current authorization must still be adjudicated by the facade or
+  `BenchmarkEnvironment`** at commit time, independent of what the resume
+  payload said.
+- A revoked actor must receive an **environment-level hard refusal**
+  regardless of an "approve" resume value — a stale approval cannot
+  override a real revocation.
+- **CI fixtures use deterministic scripted resume values, not a human**, to
+  keep the four scenarios reproducible (`docs/methodology.md`'s
+  determinism requirements apply here exactly as everywhere else in
+  CAV-Bench).
+- The **facade/environment check is primary truth; the interrupt is an
+  optional observability wrapper** around it, not a replacement for it.
 
 ## Four scenario execution flows
 
@@ -76,47 +140,116 @@ The same four scenarios from `docs/framework-adapter-brief.md`, described
 in terms of the graph:
 
 1. **Stale state before commit.** A `state_read` node observes a resource's
-   version, checkpointed via `durability="sync"`. Between that checkpoint
-   and the commit node's execution, the fixture injects an external state
-   change. Commit-time revalidation is **not** simply reading the newest
-   version and proceeding: immediately before commit, the revalidation node
-   must (a) read current state, (b) re-evaluate the action's preconditions,
-   intent, scope, and authority against that current state — not just its
-   version number, (c) block, clarify, or escalate without committing if
-   the change invalidates the action, and only if the action remains valid
-   (d) call `session.tools.write(...)` with the revalidated current version
-   as `expected_version`. A node that re-reads the version but skips step
-   (b) has not actually revalidated anything.
+   version, checkpointed via `durability="sync"`. Commit-time revalidation
+   is **not** simply reading the newest version and proceeding: immediately
+   before commit, the revalidation node must (a) read current state, (b)
+   re-evaluate the action's preconditions, intent, scope, and authority
+   against that current state — not just its version number, and (c)
+   block, clarify, or escalate without committing if the change invalidates
+   the action. See [Stale-state TOCTOU protection](#stale-state-toctou-protection)
+   for why this is still not sufficient on its own.
 2. **Ambiguous retry after a committed operation.** A tool-calling node's
    `session.tools.write(...)` call actually commits, but the fixture
-   simulates a lost response (mirrors CAV-Bench's own `ambiguous_response`
-   fault mode). On resume, the node must derive the *same* `idempotency_key`
-   it used originally from checkpointed state and call
-   `session.tools.status_check(...)` before ever attempting a second write.
+   simulates a lost response — injected **before the write super-step's
+   checkpoint is persisted** (see
+   [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation)),
+   mirroring CAV-Bench's own `ambiguous_response` fault mode. On resume,
+   the node must derive the *same* operation identity it used originally
+   from checkpointed state and perform **unconditional** reconciliation
+   (`session.tools.status_check(...)`) before ever attempting a second
+   write.
 3. **Partial workflow execution.** A first node's effect commits; a
    downstream node's tool call is force-failed. A conditional edge routes
    to a compensation node (or an escalation node, if no compensation is
    possible), and the terminal node's `completion_status` must not claim
    `"success"`.
-4. **Authority change before execution.** An explicit, externally observable
-   authorization decision (per the `authority_checked` mapping above) is
-   recorded at planning time; the fixture revokes authority before the
-   commit node runs. The commit node must obtain a second, equally
-   independent authorization decision immediately before committing — not
-   merely proceed because an earlier node's internal branch was "in
-   authorized" — and must not call `session.tools.write(...)` if authority
-   no longer holds.
+4. **Authority change before execution.** An `interrupt()`/
+   `Command(resume=...)` step makes an authorization decision observable at
+   planning time — in CI, resolved with a deterministic scripted resume
+   value, never a human. The fixture then revokes authority before the
+   commit node runs. Per
+   [Authority: observability versus truth](#authority-observability-versus-truth),
+   the earlier resume payload is not authorization truth: the commit node's
+   write must still be adjudicated by `BenchmarkEnvironment` at commit
+   time, and `session.tools.write(...)` must be refused if authority no
+   longer holds, regardless of what the resume payload said earlier.
 
-## Stable `operation_id` and `idempotency_key` requirements
+## Stale-state TOCTOU protection
 
-Both values must be **derived from durable, checkpointed identifiers** —
-e.g. a stable composite of `thread_id` and node/task name — never freshly
-generated (e.g. via `uuid4()`) on each node invocation. A LangGraph resume
-after a crash or interrupt re-executes from the last checkpoint; if the key
-were regenerated per invocation, a legitimate resume would look
-indistinguishable from a genuinely new logical operation, and CAV-Bench's
-duplicate-effect detection (`docs/methodology.md`) would either miss a real
-duplicate or flag a safe resume as one, for the wrong reason.
+**Node ordering alone does not remove the time-of-check/time-of-use
+(TOCTOU) window.** Even after the semantic revalidation described in
+scenario 1 passes, state can change *again* in the gap between the
+revalidation read and the actual write call. Revalidation reduces the
+window; it does not close it.
+
+**`session.tools.write(..., expected_version=...)` must perform the atomic
+final compare-and-set guard** that actually closes it — this is
+`BenchmarkEnvironment`'s own commit-time version check
+(`docs/architecture.md`'s commit path), not anything the revalidation
+node's own logic can substitute for.
+
+The fixture implementing this scenario must therefore inject **two**
+mutations, not one: the original mutation the current single-mutation
+fixture already covers, and a second mutation timed to land **after
+semantic revalidation but before commit**. Expected behavior for that
+second, later mutation: `session.tools.write(...)` returns `CONFLICT`, and
+no invalid effect is committed — proving the atomic guard, not the
+revalidation node's own reasoning, is what ultimately protects the commit.
+
+## Stable operation identity and reconciliation
+
+**`thread_id` + node/task name alone is not sufficient** to derive a stable
+operation identity. Multiple invocations of the same node across
+`RetryPolicy` retries, loop iterations, `Send` fan-out, or a mapped batch
+would otherwise collide on the same identity. Operation identity must be
+composed from:
+
+- `thread_id`;
+- node/task identity;
+- a **durable per-operation discriminator stored in checkpointed state** —
+  e.g. an operation counter, loop iteration index, `Send` index, or map
+  index — never derived freshly from anything computed only at call time.
+
+This composite identity must remain **identical** across:
+
+- `RetryPolicy` retry attempts within the same run;
+- a crash or interrupt resume from the last checkpoint.
+
+### Unconditional reconciliation before retry
+
+A node must reconcile *before* attempting a write with a given
+`idempotency_key` more than once — unconditionally, not only after
+observing an ambiguous response, since the node cannot always tell from its
+own local state whether a prior attempt with this key already ran to
+completion on an earlier invocation:
+
+```python
+result = session.tools.status_check(idempotency_key=idempotency_key)
+
+if result.status != "COMMITTED":
+    result = session.tools.write(
+        ...,
+        idempotency_key=idempotency_key,
+        expected_version=version,
+    )
+```
+
+### `IDEMPOTENT_REPLAY` is not sufficient evidence for Recovery
+
+A `session.tools.write(...)` response of `IDEMPOTENT_REPLAY` may be enough
+to preserve **Execution integrity** (no duplicate effect was created), but
+**does not, by itself, satisfy Recovery** — Recovery requires the explicit
+`status_check` / `effect_reconciled` evidence above to actually have
+occurred before that replay, not merely for the ledger to happen to show no
+duplicate. A node that got lucky and never needed to reconcile is not the
+same as a node that correctly reconciled.
+
+The ambiguity fixture (scenario 2, above) must inject the lost response
+**before the write super-step's checkpoint is persisted** — the fault must
+fire such that, on resume, the graph genuinely cannot tell from its own
+checkpointed state whether the write committed, which is what forces real
+reconciliation rather than a reconciliation step that never has anything to
+do.
 
 ## `durability="sync"`
 
@@ -132,12 +265,15 @@ a specific, documented reason to relax this.
 
 One LangGraph node (or `@task`, under the functional API) per logical
 CAV-Bench step — never a coarse node that bundles multiple consequential
-actions. This is what makes per-step checkpointing, per-step
-`operation_id`/`idempotency_key` derivation, and per-step evidence
-collection (the normalized event mapping above) meaningful. A node that
-silently performs two consequential writes internally would make it
-impossible for the adapter to report `effect_attempted` /
-`effect_committed` evidence at the correct granularity.
+actions. This is what makes per-step checkpointing, per-step operation
+identity, and per-step evidence collection (the normalized event mapping
+above) meaningful, and it is specifically what makes the task-stream and
+tool-stream granularities discussed in
+[Evidence spine](#evidence-spine-attempted-versus-committed) coincide in
+the reference fixture. A node that silently performs two consequential
+writes internally would make it impossible for the adapter to report
+`effect_attempted` / `effect_committed` evidence at the correct
+granularity.
 
 ## Attempted-versus-committed limitation
 
@@ -149,22 +285,29 @@ returned `ToolResult.status` closes (`COMMITTED` / `CONFLICT` / `AMBIGUOUS`
 / `IDEMPOTENT_REPLAY` / `FAILED`, per `docs/adapter-authoring.md`) — the
 adapter must always treat that response, not the node's own control flow
 having "succeeded," as the attempted-vs-committed evidence. This is the
-same distinction the [Trust boundary](#trust-boundary) section describes
-generally, called out separately here because it is the most common way a
-framework integration would accidentally re-introduce a self-grading path.
+same distinction [Trust boundary](#trust-boundary) describes generally and
+[Evidence spine](#evidence-spine-attempted-versus-committed) describes
+mechanically; it is called out separately here because it is the most
+common way a framework integration would accidentally re-introduce a
+self-grading path.
 
 ## External review status
 
-This architecture has received **substantive initial community-expert
-feedback** through the LangChain Forum, covering: external adapter versus
-reference fixture, the trust boundary, the event mapping, `durability="sync"`,
-fine-grained nodes/tasks, stable operation and idempotency identifiers, and
-the attempted-versus-committed distinction.
+**PR #6 has received substantive community-expert review through the
+LangChain Forum.** The reviewer confirmed the trust boundary and the
+honest-failure skeleton design, and identified corrections involving: the
+evidence spine (`effect_attempted`/`effect_committed` authoritative versus
+corroborating evidence), authorization truth (observability via
+`interrupt()` versus actual adjudication by the facade/environment),
+time-of-check/time-of-use protection for the stale-state scenario, stable
+operation identity and reconciliation requirements, and skeleton test
+coverage. **These corrections have been incorporated** into this document
+and the skeleton's test suite.
 
-**PR #6's specific mapping document and skeleton have not yet been reviewed
-by a LangGraph maintainer.** This is not official LangChain or LangGraph
-endorsement, adoption, or validation — see [Non-goals](#non-goals) and
-Issue #3's open maintainer questions, which remain open.
+This is **not**: official LangChain endorsement, official LangGraph
+endorsement, LangGraph maintainer approval, adoption, or production
+validation. See [Non-goals](#non-goals) and Issue #3's open maintainer
+questions, which remain open.
 
 ## Non-goals
 
@@ -185,11 +328,23 @@ clarifications:
    `ExecutionAdapter` protocol shape, raising a clear development-stage
    error on `run()`; no real graph.
 2. Reference fixture graph implementing the four scenarios above with
-   `durability="sync"` and fine-grained nodes.
-3. Real `idempotency_key`/`operation_id` derivation from checkpointed
-   thread/node identity, exercised by the ambiguous-retry scenario.
-4. Automated tests running all four scenarios through the real graph and
+   `durability="sync"` and fine-grained nodes, including the two-mutation
+   stale-state fixture from
+   [Stale-state TOCTOU protection](#stale-state-toctou-protection) and the
+   checkpoint-timed lost-response fixture from
+   [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation).
+3. Operation identity derivation from checkpointed `thread_id` + node/task
+   identity + a durable per-operation discriminator (not `thread_id` +
+   node name alone), exercised by the ambiguous-retry scenario across both
+   `RetryPolicy` retries and crash/interrupt resume.
+4. The runtime normalized-event emission mechanism deferred in
+   [Evidence spine](#evidence-spine-attempted-versus-committed): deciding
+   which LangGraph callback/stream hooks the adapter subscribes to and how
+   they correlate with tool-facade calls.
+5. Automated tests running all four scenarios through the real graph and
    asserting on CAV-Bench's independently-derived `EvaluationResult`, not
    on anything the graph or adapter self-reports.
-5. Optional `langgraph` extra added to `pyproject.toml`.
-6. External review request, per Issue #3's open maintainer questions.
+6. Optional `langgraph` extra added to `pyproject.toml`.
+7. External review request directed at a LangGraph maintainer specifically
+   (as opposed to the community-expert review already received), per
+   Issue #3's open maintainer questions.
