@@ -153,7 +153,7 @@ silently.
 | `state_revalidated` | A node that re-reads state immediately before a commit-issuing node and re-evaluates the action against it (see [State read vs. commit-time revalidation](#state-read-versus-commit-time-revalidation) and [Stale-state TOCTOU protection](#stale-state-toctou-protection) — revalidation alone does not close the race). |
 | `effect_attempted` | Backed by the benchmark-owned `tool_call_attempt` trace event, recorded synchronously near the beginning of `BenchmarkEnvironment.commit()` — after `ToolFacade.write()` delegates the operation and before the environment applies fault hooks, validation checks, idempotency checks, or external effects. Entering a graph node alone is **not** sufficient evidence: a node may run and exit without ever invoking a consequential tool. See [Evidence spine](#evidence-spine-attempted-versus-committed). |
 | `effect_committed` | Authoritative only when backed by the benchmark-owned `side_effect_commit` trace event / side-effect ledger — never from a LangGraph-reported fact. `ToolResult.status="COMMITTED"` gives the adapter immediate confirmation; `status="AMBIGUOUS"` gives it neither confirmation nor disconfirmation and requires reconciliation. See [Trust boundary](#trust-boundary), [Evidence spine](#evidence-spine-attempted-versus-committed), and [Attempted versus committed](#attempted-versus-committed) for the implemented `FA-02`/`FA-03` behavior. |
-| `effect_reconciled` | A node that calls `session.tools.status_check(...)` with the same stable `idempotency_key`, performed **unconditionally** before any retry — run after an ambiguous acknowledgement or when resuming from a checkpoint (implemented: `FA-02`'s `reconcile` node). See [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
+| `effect_reconciled` | A call to `session.tools.status_check(...)` with the same stable `idempotency_key`, performed **unconditionally** before any write and again before any retry (implemented: `FA-02`'s `commit_refund` node reconciles immediately before every possible write, on every invocation; its dedicated `reconcile` node reconciles again after an `AMBIGUOUS` or `IDEMPOTENT_REPLAY` write response). See [Reconciliation behavior](#reconciliation-behavior) and [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
 | `compensation_started` / `compensation_completed` | A dedicated compensation node, reached via a conditional edge when a downstream node's write returns `FAILED` (implemented: `FA-03`'s `compensate` node). |
 | `escalation_created` | A node calling `session.escalate(...)` (implemented in the `FA-02`/`FA-03`/`FA-04` block/escalate nodes), optionally surfaced to a human via LangGraph's `interrupt()` / human-in-the-loop mechanism for a future real-agent adapter. |
 | `outcome_reported` | The graph's terminal node output, mapped to `AdapterResult.completion_status` — untrusted, exactly as for every other adapter. |
@@ -253,11 +253,18 @@ must use the same **stable operation identity** throughout (see
 [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation))
 — never a freshly generated identifier per call.
 
-This document does **not** specify a complete runtime normalized-event
-emission mechanism — deciding exactly which LangGraph callback/stream hooks
-the adapter subscribes to, and how it correlates them with tool-facade
-calls into the normalized event stream, is out of scope for this
-design-stage PR. It is recorded as a required item under
+**The executable reference fixture emits normalized diagnostic events
+through checkpointed graph state**, not through LangGraph's own
+callback/stream hooks (`on_tool_start`/`astream_events`,
+`stream_mode="tasks"`) — each node explicitly appends to the
+`normalized_events` list it returns, correlated directly with the
+tool-facade call that node makes. This sidesteps the granularity mismatch
+discussed above entirely, rather than resolving it: **it does not
+implement a general callback- or stream-correlation layer for arbitrary
+LangGraph applications.** A generalized emission mechanism — one that
+could observe an arbitrary graph's own tool/task streams and correlate
+them with tool-facade calls without the graph's own nodes cooperating —
+remains future work; see
 [Next implementation milestones](#next-implementation-milestones).
 
 ## Authority: observability versus truth
@@ -322,10 +329,11 @@ disagreement with the review.
   hard refusal comparable to the `expected_version` compare-and-set guard —
   requires a separately reviewed runtime design change** to carry
   authorization context into `ToolFacade.write()` /
-  `BenchmarkEnvironment.commit()`. It is not implemented in this PR (see
-  [Next implementation milestones](#next-implementation-milestones)), and
-  no future PR — including PR #8 — may claim this capability unless it is
-  actually implemented and tested through that approved runtime change.
+  `BenchmarkEnvironment.commit()`. **This PR does not implement or claim
+  atomic commit-boundary authority enforcement.** That capability requires
+  a separately reviewed runtime change (see
+  [Next implementation milestones](#next-implementation-milestones)) and
+  must not be claimed as already implemented until it actually is.
 
 ## Four scenario execution flows
 
@@ -345,15 +353,24 @@ the `framework-v1` pack and executed by the reference graphs:
    naive graph commits against the stale observation and the evaluator
    derives `TS_STALE_WITNESS` from environment-recorded versions.
 2. **Ambiguous retry after a committed operation (`FA-02`).** The
-   `commit_refund` node's write genuinely commits, but the scenario's
-   `ambiguous_response` fault swallows the acknowledgement. The guarded
-   graph routes to `reconcile`, which derives the *same* stable
-   `idempotency_key` from durable identity and calls
-   `session.tools.status_check(...)` **before any possible second write**;
-   the confirmed commit ends the run with exactly one ledger effect. A
-   replay under the same key is answered `IDEMPOTENT_REPLAY` and does not
-   grow the ledger. The naive graph retries under a fresh per-attempt key
-   and produces `EI_DUPLICATE_LOGICAL_EFFECT`.
+   `commit_refund` node reconciles via `session.tools.status_check(...)`
+   with the *same* stable `idempotency_key`, derived from durable
+   identity, **immediately before every possible write** — including its
+   first invocation. Finding `NOT_FOUND`, it writes once; the scenario's
+   `ambiguous_response` fault swallows the acknowledgement, and the
+   dedicated `reconcile` node performs a second status check that finds
+   the commit confirmed, ending the run with exactly one ledger effect. If
+   this node is instead re-invoked after a crash that lost its own result
+   before LangGraph checkpointed it — the external effect having already
+   committed — its own pre-write status check finds `COMMITTED` and skips
+   the write entirely, rather than blindly reissuing it (see
+   [Reconciliation behavior](#reconciliation-behavior) for why a separate
+   preceding node cannot catch this case). A replay under the same key
+   that does reach `session.tools.write(...)` is answered
+   `IDEMPOTENT_REPLAY` and does not grow the ledger, but is routed through
+   the same explicit post-write reconciliation as `AMBIGUOUS` — never
+   treated as direct confirmation. The naive graph retries under a fresh
+   per-attempt key and produces `EI_DUPLICATE_LOGICAL_EFFECT`.
 3. **Partial workflow execution (`FA-03`).** The `reserve` node's effect
    commits; the scenario force-fails the downstream `capture` write. A
    conditional edge routes to the `compensate` node (releasing the
@@ -520,15 +537,45 @@ itself).
 
 ## Reconciliation behavior
 
-After an `AMBIGUOUS` acknowledgement, the guarded fixture never issues
-another write before reconciling: the next facade operation is always
-`status_check(idempotency_key=<same stable key>)`. Only a `NOT_FOUND`
-reconciliation result can route back to a (bounded) retry of the write —
-under the same key, so even a wrongly-repeated write is deduplicated by
-the environment as `IDEMPOTENT_REPLAY`. Tests assert the event ordering
-(no `tool_call_attempt` after the ambiguous response until the
-`operation_status_read`), the single ledger entry, and the safe-replay
-property.
+The guarded FA-02 write node (`fa02_commit_refund`) reconciles via a
+stable-key `status_check(idempotency_key=<same stable key>)` **immediately
+before every possible write, inside the write node itself, on every
+invocation** — not only after observing an `AMBIGUOUS` acknowledgement,
+and not in a separate node that runs once before it.
+
+**Why a separate preceding reconciliation node is not sufficient:** a
+checkpoint could be persisted after that separate node runs; the external
+effect could then commit inside the write node; and the process could
+crash before the write node's own return value is checkpointed. Resuming
+from that checkpoint re-invokes the write node directly — the separate
+reconciliation node never runs again — so a design that only reconciled
+*before entering* the write node would blindly reissue the write against
+an operation that had already committed. Performing the status check
+*inside* the write node, first, on every invocation (including the very
+first), is what closes this gap:
+
+- **Pre-write status check.** `NOT_FOUND` means nothing has committed yet
+  under this key; the node proceeds to write once. `COMMITTED` means a
+  prior invocation of this same node already committed the effect but its
+  result was never checkpointed (the crash-before-checkpoint case above);
+  the node does not write again, and does not fabricate
+  `effect_attempted`/`effect_committed` diagnostics for the write it never
+  issued.
+- **After the write:** `COMMITTED` may route directly to confirmation.
+  `AMBIGUOUS` and `IDEMPOTENT_REPLAY` both route to the same explicit
+  post-write reconciliation node — `IDEMPOTENT_REPLAY` indicates the
+  environment deduplicated against an already-committed effect, not a new
+  commit by this invocation, and by itself is **not sufficient evidence
+  for Recovery**; it must not be treated as direct confirmation. Only a
+  `NOT_FOUND` post-write reconciliation result can route back to a
+  (bounded) retry of the write, under the same key, so even a
+  wrongly-repeated write is deduplicated by the environment.
+
+Tests assert the full ordering (pre-write `NOT_FOUND` reconciliation
+precedes the one write attempt; a post-write reconciliation follows the
+commit), the single ledger entry, the safe-replay property, and —
+separately — the precise crash-before-checkpoint interleaving described
+above (`tests/langgraph/test_identifiers_retry_resume.py`).
 
 ## Stable identifier derivation
 

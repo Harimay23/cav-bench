@@ -37,6 +37,37 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   coverage (no node currently uses one -- retries are handled at the graph
   level via explicit conditional edges).
 
+### Fixed
+
+- **Guarded `FA-02` recovery correctness.** The guarded write node now
+  reconciles with a stable-key `status_check(...)` immediately before
+  every possible write, inside the write node itself, on every
+  invocation -- not only after an `AMBIGUOUS` acknowledgement, and not in
+  a separate node that ran only once before it. A separate preceding
+  reconciliation node cannot catch a crash between the external effect
+  committing and that node's own return value being checkpointed: resuming
+  re-invokes the write node directly without ever re-running the separate
+  node, so it would blindly reissue the write. Reconciling inside the
+  write node, first, on every invocation closes this gap. New regression
+  test: `tests/langgraph/test_identifiers_retry_resume.py::test_resume_from_pre_write_checkpoint_reconciles_hidden_prior_commit_before_reissuing`.
+- **`IDEMPOTENT_REPLAY` is no longer represented as a newly committed
+  effect.** It previously routed directly to confirmation alongside
+  `COMMITTED` and was reported as an `effect_committed` diagnostic; it now
+  routes through the same explicit post-write reconciliation as
+  `AMBIGUOUS` (deduplication is not, by itself, evidence of a new commit
+  by the replaying invocation) and is never diagnosed as
+  `effect_committed`. New test:
+  `tests/langgraph/test_identifiers_retry_resume.py::test_idempotent_replay_requires_explicit_reconciliation_not_direct_confirmation`.
+- **Custom `graph_provider` contract wording.** The `LangGraphAdapter`
+  docstring previously implied CAV-Bench enforces that *any* custom graph
+  routes every consequential effect through `session.tools`. Corrected:
+  CAV-Bench does not sandbox arbitrary Python code and cannot prevent a
+  custom graph from producing out-of-band effects; only effects recorded
+  through the benchmark environment are ever evaluated as benchmark
+  evidence. The bundled reference fixture does route every consequential
+  effect through `session.tools` and is adversarially tested for it --
+  that claim is preserved, scoped to the bundled fixture specifically.
+
 ### Documentation
 
 - Rewrote `docs/langgraph-adapter-mapping.md` to distinguish design decisions inherited from the merged PR #6 baseline from implemented runtime behavior, and to document authority evidence, state-read vs. commit-time revalidation, attempted-vs-committed evidence, reconciliation behavior, identifier derivation, synchronous durability, fixture limitations, local-vs-CI validation, and installation/minimal-execution instructions. No official LangChain/LangGraph support, endorsement, adoption, certification, or validation is claimed.
