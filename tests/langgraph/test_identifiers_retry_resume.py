@@ -112,9 +112,15 @@ def test_resume_from_pre_write_checkpoint_reconciles_hidden_prior_commit_before_
 
     # Simulate commit_refund's own (never-checkpointed) execution: the
     # external effect commits, but the fault mode returns AMBIGUOUS and
-    # nothing about this call is written into LangGraph state.
+    # nothing about this call is written into LangGraph state. Mirrors the
+    # real node as closely as possible, including expected_version --
+    # derived from the checkpointed read-1 observation, the same value
+    # _observed_version(state, step) would compute inside commit_refund,
+    # not hardcoded.
     step = session.scenario.plan.step("write-1")
     idempotency_key = derive_idempotency_key("FA-02", THREAD_ID, "write-1")
+    observed_version = interrupted["observed"][f"{step.namespace}:{step.resource_id}"]["version"]
+    assert isinstance(observed_version, int)
     hidden_write = session.tools.write(
         step_id=step.step_id,
         tool_name=step.tool_name,
@@ -124,6 +130,7 @@ def test_resume_from_pre_write_checkpoint_reconciles_hidden_prior_commit_before_
         args=step.args,
         logical_operation_id=step.logical_operation_id,
         idempotency_key=idempotency_key,
+        expected_version=observed_version,
     )
     assert hidden_write.status == "AMBIGUOUS", "FA-02's injected fault must fire on this first write"
     assert len(env.ledger.as_dicts()) == 1, "the hidden write must have genuinely committed"

@@ -143,8 +143,10 @@ class LangGraphAdapter:
         config = {"configurable": {"thread_id": thread_id, "cavbench_session": session}}
 
         # durability="sync": a checkpoint is written synchronously after each
-        # super-step before execution proceeds, so any resume observes a
-        # complete record of what already executed.
+        # super-step before execution proceeds, so a resume never observes a
+        # checkpoint predating a *completed* step. It does not eliminate the
+        # external-effect/checkpoint gap inside a still-running node -- see
+        # docs/langgraph-adapter-mapping.md's durability="sync" section.
         final_state: Mapping[str, Any] = graph.invoke(
             {"user_request": session.scenario.user_request}, config=config, durability=self._durability
         )

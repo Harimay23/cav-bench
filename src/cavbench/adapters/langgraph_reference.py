@@ -421,8 +421,11 @@ def fa02_route_after_commit(state: FixtureState) -> str:
 
 
 def fa02_reconcile(state: FixtureState) -> FixtureState:
-    """The acknowledgement was ambiguous: resolve the operation's true status
-    with the *same* stable idempotency key before considering another write."""
+    """The write response requires explicit confirmation. Reconcile the
+    operation's true status with the *same* stable idempotency key before
+    considering another write. This node handles both `AMBIGUOUS` and
+    `IDEMPOTENT_REPLAY` responses (see `fa02_route_after_commit`); neither
+    is treated as direct confirmation."""
     step = _scenario().plan.step("write-1")
     operation_id, idempotency_key = stable_identifiers(step)
     result = _session().tools.status_check(idempotency_key=idempotency_key)

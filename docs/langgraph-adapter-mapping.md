@@ -630,15 +630,40 @@ test, and no milestone claim below should say otherwise.
 ## `durability="sync"`
 
 Graph execution uses LangGraph's `durability="sync"` mode (available since
-langgraph 0.6): a checkpoint is written synchronously after each
-super-step completes, before the graph proceeds. This is the conservative
-choice — it guarantees that any resume observes an accurate, complete
-record of what already executed, rather than resuming from a checkpoint
-that predates a step whose outcome is unknown. The adapter passes it on
-every `invoke`; the resume tests interrupt after the ambiguous commit and
-rely on the synchronously-written checkpoint. Weaker durability modes
-remain out of scope until there is a specific, documented reason to relax
-this.
+langgraph 0.6) so completed super-step checkpoints are persisted
+synchronously before execution advances. This reduces checkpoint lag and
+ensures that completed super-steps are durably represented before later
+graph work proceeds — a resume never observes a checkpoint that predates a
+*completed* step. The adapter passes it on every `invoke`. Weaker
+durability modes remain out of scope until there is a specific, documented
+reason to relax this.
+
+**It does not eliminate the external-effect/checkpoint gap inside a
+running node.** An external effect may commit and the process may fail
+before that node's own returned state is checkpointed. In that
+interleaving, the last durable graph checkpoint can still predate the
+committed effect — synchronous durability only guarantees that a
+*completed* node's result is checkpointed before the graph proceeds; it
+says nothing about a node whose own execution is interrupted mid-flight.
+Stable operation identity, environment-owned idempotency, and the guarded
+`FA-02` node's pre-write status reconciliation (see
+[Reconciliation behavior](#reconciliation-behavior)) remain necessary for
+safe recovery from that interleaving — this is precisely the case the
+hidden-prior-commit regression test exercises.
+
+Two distinct resume tests cover the two distinct cases:
+`test_checkpoint_resume_reuses_the_same_identifiers_and_reconciles_before_writing`
+interrupts *after* `commit_refund` has already returned (`interrupt_after=
+["commit_refund"]`), so the checkpoint it resumes from already reflects a
+*completed* node execution — this is the case synchronous durability
+directly covers.
+`test_resume_from_pre_write_checkpoint_reconciles_hidden_prior_commit_before_reissuing`
+interrupts *before* `commit_refund` ever runs (`interrupt_after=
+["read_state"]`) and then commits the effect directly through the tool
+facade to simulate `commit_refund`'s own execution having happened but
+never been checkpointed — this is the external-effect/checkpoint gap
+synchronous durability does *not* close, and what the write node's
+pre-write reconciliation exists to handle.
 
 ## Fine-grained node boundaries
 
