@@ -27,15 +27,21 @@ def test_decision_log_has_no_duplicate_identifiers() -> None:
     assert not duplicates, f"duplicate decision identifiers in DECISION_LOG.md: {duplicates}"
 
 
-def test_decision_log_identifiers_are_distinct_from_pr8_reserved_ids() -> None:
-    """PR #8 (feat/langgraph-four-scenario-runtime) is open, frozen, and
-    reserves D-020 for the framework-v1 pack decision on its own branch --
-    it is not visible in this branch's DECISION_LOG.md, so the generic
-    duplicate check above cannot see it. Pin it explicitly so a future
-    rename accident is still caught locally before the branches merge."""
+def test_generic_protocol_gateway_decision_is_d021() -> None:
+    """The M-GPI-1 gateway decision was originally recorded as D-020,
+    which collided with an identifier PR #8
+    (feat/langgraph-four-scenario-runtime, framework-v1 pack) legitimately
+    owns on its own branch. It was renamed to D-021 on this branch.
+
+    This assertion is scoped to *this decision*, not to D-020's absence
+    from the file in general: once PR #8 merges, D-020 will correctly
+    exist in DECISION_LOG.md for the framework-v1 pack decision, and that
+    is not a regression -- it is the expected valid merged state (D-020
+    framework-v1, D-021 M-GPI-1). A prior version of this test asserted
+    D-020 could never appear at all, which would have started failing
+    the moment PR #8 merged; that assertion has been removed."""
     text = Path("DECISION_LOG.md").read_text()
-    ids = set(DECISION_HEADING.findall(text))
-    assert "D-020" not in ids, (
-        "D-020 is reserved by open PR #8 (framework-v1 pack decision) -- "
-        "do not reuse it in this branch's DECISION_LOG.md"
-    )
+    match = re.search(r"^## (D-\d+) — Generic protocol integration \(M-GPI-1\)", text, re.MULTILINE)
+    assert match is not None, "expected a 'Generic protocol integration (M-GPI-1)' decision heading"
+    assert match.group(1) == "D-021"
+    assert match.group(1) != "D-020"
