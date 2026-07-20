@@ -550,8 +550,35 @@ ledger unchanged) from a genuinely new logical operation. If the key were
 regenerated per invocation, a safe resume would be indistinguishable from
 a duplicate — the naive `FA-02` variant demonstrates precisely this
 failure. `tests/langgraph/test_identifiers_retry_resume.py` exercises
-stability across an in-run retry, a checkpoint interrupt/resume, and a
-manual replay.
+stability across a checkpoint interrupt/resume (a genuine LangGraph
+crash-and-resume, `test_checkpoint_resume_reuses_the_same_identifiers_and_reconciles_before_writing`)
+and a manual replay.
+
+**Why `thread_id` + `step_id` alone is a sufficient discriminator for this
+fixture, but not in general.** Each `framework-v1` scenario's plan has each
+`step_id` appear **at most once** per run — there are no loops, no `Send`
+fan-out, and no node that maps to more than one logical operation. Under
+that constraint, `step_id` alone already uniquely identifies the operation
+within a thread, so no additional per-operation discriminator (an
+operation counter, loop iteration index, `Send` index, or map index, per
+[Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation))
+is needed. **A general LangGraph adapter — one whose graphs may loop, fan
+out, or otherwise invoke the same node more than once per logical
+operation — must add such a discriminator to the key composition**, or
+distinct operations within the same node would collide on the same
+`idempotency_key`. This fixture does not need one only because its graphs
+are scenario-shaped and non-repeating (see
+[Fixture limitations](#fixture-limitations)).
+
+**`RetryPolicy` is not currently wired into any node.** The fixture handles
+retries at the graph level instead — an explicit conditional edge routes
+back to a write node (e.g. `fa02_route_after_reconcile` routing to
+`commit_refund` again) as an ordinary graph step, not as LangGraph's
+automatic node-level retry mechanism. `derive_idempotency_key(...)` is a
+pure function of scenario/thread/step identity with no invocation counter,
+so it would remain stable if a future scenario did attach a `RetryPolicy`
+to a node — but that specific mechanism is not exercised by any current
+test, and no milestone claim below should say otherwise.
 
 ## `durability="sync"`
 
@@ -747,13 +774,30 @@ clarifications:
    [Stale-state TOCTOU protection](#stale-state-toctou-protection) and the
    checkpoint-timed lost-response fixture from
    [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation).~~
-   **Done (this milestone) — see [FA-01 audit](#four-scenario-execution-flows)
-   for confirmation both timing variants are exercised.**
+   **Done (this milestone).** The canonical `FA-01` fixture exercises the
+   first timing variant (state changes before revalidation, caught by the
+   revalidation node itself). The second timing variant (state changes
+   after revalidation but before the write, caught only by the atomic
+   `expected_version` compare-and-set guard) is exercised by
+   `tests/langgraph/test_runtime_scenarios.py::test_stale_state_scenario_second_timing_variant_relies_on_the_atomic_guard`,
+   which constructs the same scenario with the fault moved from
+   `after_read` to `before_commit` rather than adding a second scenario
+   file for what is the same write step. The checkpoint-timed
+   lost-response fixture is `FA-02`, exercised by
+   `tests/langgraph/test_identifiers_retry_resume.py`.
 3. ~~Operation identity derivation from checkpointed `thread_id` + node/task
    identity + a durable per-operation discriminator (not `thread_id` +
-   node name alone), exercised by the ambiguous-retry scenario across both
-   `RetryPolicy` retries and crash/interrupt resume.~~ **Done (this
-   milestone) — see [Stable identifier derivation](#stable-identifier-derivation).**
+   node name alone).~~ **Partially done (this milestone) — see
+   [Stable identifier derivation](#stable-identifier-derivation): exercised
+   by the ambiguous-retry scenario across a genuine checkpoint interrupt
+   and resume, and stability is proven for this fixture's non-repeating,
+   scenario-shaped graphs (`thread_id` + `step_id` alone is a sufficient
+   discriminator here). `RetryPolicy`-triggered node-level retry is
+   **not** wired into any node or exercised by any test. A durable
+   per-operation discriminator beyond `step_id` (an operation counter,
+   loop iteration index, `Send` index, or map index) remains required for
+   a general adapter whose graphs loop, fan out, or invoke the same node
+   more than once per logical operation — this fixture does not need one.**
 4. ~~The runtime normalized-event emission mechanism deferred in
    [Evidence spine](#evidence-spine-attempted-versus-committed).~~ **Done
    (this milestone), resolved without subscribing to LangGraph's own

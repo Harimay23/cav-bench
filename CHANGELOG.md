@@ -10,7 +10,7 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Added
 
-- Executable LangGraph integration (the next milestone from Issue #5, stacked on the PR #6 design-stage skeleton):
+- Executable LangGraph integration (the next milestone from Issue #5, implementing the merged PR #6 design-stage skeleton):
   - `LangGraphAdapter` now actually runs a compiled LangGraph graph against an `AdapterSession` (checkpointer, durable `thread_id`, `durability="sync"`), mapping terminal graph state to an untrusted `AdapterResult`. LangGraph stays an optional, lazily-imported dependency; a missing install raises a clear invocation-time error naming `cav-bench[langgraph]`.
   - Optional `langgraph` extra in `pyproject.toml` (`langgraph>=0.6,<2`; CI continuously tests the declared floor, `langgraph==0.6.0`, and the range's latest resolved release — see `docs/langgraph-adapter-mapping.md#local-vs-ci-validation`).
   - `framework-v1` builtin scenario pack: the four framework-adapter scenarios from `docs/framework-adapter-brief.md` (FA-01 stale state before commit, FA-02 ambiguous retry, FA-03 partial execution, FA-04 authority change before commit), kept separate from the frozen `core-v1` corpus (see DECISION_LOG D-020).
@@ -19,6 +19,23 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   - `examples/langgraph_adapter.py`: runnable outcome-pass vs. commit-valid-fail demonstration (naive run passes a conventional outcome check but fails commit validity on `TS_STALE_WITNESS`; the guarded control adds one revalidation node and becomes commit-valid).
   - CI (`.github/workflows/ci.yml`): a new `langgraph` job (matrix: `langgraph==0.6.0` and the latest resolved release) actually runs `tests/langgraph/`, the runnable example, and `cavbench validate --pack framework-v1` against the real dependency on every push/PR — previously the executable LangGraph suite silently skipped in CI (`pytest.importorskip`) because only the base `.[dev]` extra was installed. A new `wheel-smoke-test-langgraph` job additionally installs the *built wheel* with its `[langgraph]` extra and re-runs the same validation, so the packaged optional extra is verified, not only the source tree. The existing Python 3.11/3.12/3.13 `test` matrix is unchanged and continues to run without the extra, which is what continuously verifies dependency isolation and the missing-dependency error path.
 - `cavbench list packs` now lists both builtin packs.
+- Synchronized the executable LangGraph work with the final merged PR #6
+  trust-boundary and dependency-isolation contract: corrected residual
+  "tool facade is the authoritative source of commit truth" language in the
+  mapping doc and the adapter's module docstring to the precise split (tool
+  facade as the sole adapter-visible execution path;
+  `BenchmarkEnvironment`/trace/ledger as authoritative truth); made
+  `tests/contract/test_langgraph_adapter_contract.py`'s missing-dependency
+  test deterministic (monkeypatched, no longer environment-dependent) and
+  added a nested-import-failure test; fixed `AdapterResult.metadata`'s
+  `langgraph_version` diagnostic, which always reported `"unknown"` because
+  `langgraph` does not set a module-level `__version__` attribute, to read
+  installed package metadata instead; added the missing second stale-state
+  TOCTOU timing variant test for `FA-01` (state changes after revalidation
+  but before the write, caught only by the atomic `expected_version`
+  guard); and corrected a milestone claim that overstated `RetryPolicy`
+  coverage (no node currently uses one -- retries are handled at the graph
+  level via explicit conditional edges).
 
 ### Documentation
 
