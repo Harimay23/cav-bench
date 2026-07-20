@@ -45,6 +45,12 @@ class CapabilityViolationError(GatewayError):
     for the current scenario. Raised before any `ToolFacade` call."""
 
 
+class ServerLifecycleError(GatewayError):
+    """A `GatewayRestServer` lifecycle method was called in an invalid
+    order (e.g. `start()` after `stop()`). Raised deterministically,
+    never left to hang or silently no-op in a way that would mask a bug."""
+
+
 class MissingExtraError(GatewayError, ImportError):
     """An optional gateway dependency required for a feature is not installed.
 
