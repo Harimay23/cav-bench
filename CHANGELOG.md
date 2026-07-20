@@ -52,13 +52,24 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
   every handler shares one mutable `GatewaySession`, so concurrent
   handling would make commit order, trace order, and log order
   nondeterministic; requests are now handled one at a time, in full,
-  before the next is accepted, proven by
+  before the next is accepted -- processing order follows whatever order
+  the underlying TCP connections were accepted in (no gateway-imposed
+  queueing, sorting, or reordering); a reproducible ordered candidate
+  trace requires the candidate itself to send one request at a time and
+  wait for each response. Proven by
   `tests/contract/test_gateway_rest_concurrency.py` (no overlap, 1:1
   request-to-`ToolFacade` mapping under concurrent load, monotonic log
-  sequencing, no racing ledger commits, report submission cannot race a
-  consequential operation, deterministic final state across repeated
-  concurrent runs). Server lifecycle (`created -> running -> stopped`)
-  is now deterministic and idempotent: `stop()` before `start()` no
+  sequencing in actual processing order, no racing ledger commits,
+  report submission cannot race a consequential operation, deterministic
+  final benchmark state across repeated concurrent runs without claiming
+  a reproducible ordered trace). Server lifecycle
+  (`created -> running -> stopped`) is now deterministic and idempotent,
+  including closing a startup race where `start()` could previously
+  return before `serve_forever()` had actually begun running: `start()`
+  now blocks (bounded) until a `service_actions()`-based handshake
+  confirms the server loop is genuinely active, and `start()`/`stop()`
+  share one lock so competing calls from different threads resolve
+  deterministically instead of racing. `stop()` before `start()` no
   longer hangs, `start()` while running is a no-op, `start()` after
   `stop()` raises `ServerLifecycleError`, and `stop()`/`server_close()`
   are safe to call repeatedly (`tests/unit/test_gateway_rest_lifecycle.py`).

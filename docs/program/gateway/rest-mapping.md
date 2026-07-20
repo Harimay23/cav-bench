@@ -7,8 +7,14 @@ Standard-library `http.server` only — no new runtime dependency
 (`http.server.HTTPServer`, not `ThreadingHTTPServer`): requests are
 handled one at a time, in full, before the next is accepted, so wire
 concurrency can never make the shared session's commit order, trace
-order, or log order nondeterministic — see
-[`architecture.md`](architecture.md#request-serialization).
+order, or log order nondeterministic. Processing order follows whatever
+order the underlying TCP connections were accepted in — not a
+reproducible, gateway-imposed order; a candidate that wants a
+reproducible ordered trace must itself send one request at a time and
+wait for each response. No queue ordering, batching, sorting, or
+parallel execution is introduced. See
+[`architecture.md`](architecture.md#request-serialization) for the full
+concurrency contract.
 
 ## Routes
 

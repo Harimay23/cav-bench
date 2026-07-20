@@ -202,53 +202,101 @@ Every REST request handler shares one mutable `GatewaySession` — its
 `BenchmarkEnvironment`, `ToolFacade`, idempotency map, final-report state,
 and session log. A prior review found `GatewayRestServer` used
 `http.server.ThreadingHTTPServer`, which would let two requests mutate
-that shared state concurrently: request order, commit order, trace
-order, and session-log ordering would all become nondeterministic —
-exactly the property this benchmark exists to measure, not to introduce
-into its own measurement plumbing.
+that shared state concurrently: commit order, trace order, and
+session-log ordering would all become nondeterministic — exactly the
+property this benchmark exists to measure, not to introduce into its own
+measurement plumbing.
 
 `GatewayRestServer` now uses plain `http.server.HTTPServer` (no
 `ThreadingMixIn`): it accepts and fully handles one connection before
-accepting the next, so two "simultaneous" client requests are, by
-construction, processed strictly one at a time, never concurrently. This
-is the simplest approved deterministic model — no remote mode, worker
-pools, asynchronous execution, batching, or parallel commit semantics.
+accepting the next.
+
+**The concurrency contract, precisely** (see
+`cavbench.gateway.rest` module docstring, which is the normative source
+this section summarizes):
+
+- Requests are processed sequentially and never overlap — two
+  "simultaneous" client requests are, by construction, always handled
+  one after the other, never concurrently.
+- Processing order is whatever order `http.server.HTTPServer` actually
+  accepted the underlying TCP connections in. The gateway does not
+  read ahead, queue, sort, batch, or reorder requests to impose any
+  particular order.
+- A deterministic, reproducible candidate trace requires the candidate
+  itself to send one request at a time and wait for each response
+  before the next — exactly how the reference candidate and every
+  baseline profile already behave. A candidate that fires genuinely
+  concurrent requests gets the absence-of-overlap guarantee above, not
+  a reproducible cross-run ordering for those requests.
+- No queue ordering, batching, sorting, or parallel execution is
+  introduced anywhere in this frontend.
+
 See `tests/contract/test_gateway_rest_concurrency.py`, which fires
 several requests from separate client threads at once and proves, via an
 instrumented wrapper around `GatewaySession.handle` (the single entry
 point for every request kind, including reads, writes, compensation,
-reconciliation, and the final report), that handling never overlaps;
+reconciliation, and the final report): that handling never overlaps;
 that accepted concurrent requests still map one-to-one to `ToolFacade`
-calls; that session-log sequence numbers stay unique and contiguous;
-that ledger commits never race; that report submission cannot race a
-consequential operation; and that two independent runs of the same
-concurrent workload converge on the same final benchmark state (the
-same `tool_facade_call_count`, ledger effect count, and log-entry
-shapes), even though true TCP connection-arrival order across
-independent client threads is not itself something the test suite
-controls.
+calls; that session-log sequence numbers stay unique and contiguous in
+whatever order was actually processed; that ledger commits never race
+(8 concurrent writes against the same resource, distinguished only by
+identity fields, produce exactly 8 distinct effects); that report
+submission cannot race a consequential operation; and that two
+independent runs of the same concurrent workload converge on the same
+final benchmark state (`tool_facade_call_count`, ledger effect count,
+log-entry shapes) — without claiming, or needing, a reproducible ordered
+trace across those runs.
 
 ## Server lifecycle
 
-`GatewayRestServer` lifecycle states: `created -> running -> stopped`.
-A prior review found `stop()` before `start()` hung, because
-`socketserver.TCPServer.__init__` (transitively, `HTTPServer.__init__`)
-already binds and listens on the socket — so it exists even if
-`serve_forever()` was never started — while `HTTPServer.shutdown()`
-blocks waiting for a `serve_forever()` loop iteration that will never
-happen if the loop was never running. `start()`/`stop()` are now
-lifecycle-aware: `stop()` before `start()` only closes the listening
+`GatewayRestServer` lifecycle states: `created -> running -> stopped`,
+protected by one lock so competing `start()`/`stop()` calls serialize
+deterministically instead of racing. Two issues surfaced across review:
+
+1. **`stop()` before `start()` hung.** `socketserver.TCPServer.__init__`
+   (transitively, `HTTPServer.__init__`) already binds and listens on
+   the socket — so it exists even if `serve_forever()` was never
+   started — while `HTTPServer.shutdown()` blocks waiting for a
+   `serve_forever()` loop iteration that will never happen if the loop
+   was never running.
+2. **A startup race.** `start()` launched the server thread and returned
+   immediately, without proving `serve_forever()` had actually reached
+   its loop. An immediate `stop()` could therefore call `shutdown()`
+   before it was safe to — the same hang as (1), just reachable through
+   `start()` returning too early rather than never being called at all.
+
+Both are closed by `_HandshakingHTTPServer`, a thin `HTTPServer`
+subclass that overrides the documented `service_actions()` extension
+point (called once per `serve_forever()` loop iteration, always *after*
+that iteration's `select()` call) to signal a `threading.Event` the
+first time it fires — the earliest point at which "the loop is actually
+running" is provably true, not just "the thread was scheduled." `start()`
+now blocks on that event (bounded by a startup timeout) before
+returning, so `_state` never becomes `"running"` until `serve_forever()`
+has genuinely begun; `stop()` only calls `shutdown()` when `_state` says
+`"running"`, so it can never race ahead of an unconfirmed startup.
+Because `start()` and `stop()` hold the same lock for their entire call
+(including any bounded wait), a `stop()` arriving mid-startup simply
+blocks until `start()` finishes resolving to a definite state first —
+there is no window in which either method observes or acts on an
+ambiguous "maybe running" state.
+
+Net behavior: `stop()` before `start()` only closes the listening
 socket, never calls `shutdown()`, and returns immediately; `start()`
 while already running is an idempotent no-op; `start()` after `stop()`
-raises `cavbench.gateway.errors.ServerLifecycleError` (restarting a
-stopped `HTTPServer` is not supported); `stop()` is idempotent and calls
-`server_close()` exactly once regardless of how many times it is
-called. Normal `with GatewayRestServer(session) as server:` use is
-unaffected, including cleanup after an exception inside the block
-(Python's context-manager protocol always runs `__exit__`). See
+raises `cavbench.gateway.errors.ServerLifecycleError`; a `start()` whose
+startup handshake times out tears the server down and raises the same
+error rather than leaving it ambiguous; `stop()` is idempotent and calls
+`server_close()` exactly once regardless of how many times it is called.
+Normal `with GatewayRestServer(session) as server:` use is unaffected,
+including cleanup after an exception inside the block. See
 `tests/unit/test_gateway_rest_lifecycle.py`, which bounds every risky
-call with a daemon-thread timeout helper so a regression that
-reintroduces a hang fails the test loudly instead of hanging the suite.
+call with a daemon-thread timeout helper (so a regression that
+reintroduces a hang fails the test loudly instead of hanging the suite)
+and covers rapid repeated start/stop cycles, competing threads calling
+`start()`/`stop()` simultaneously, `stop()` arriving mid-startup, a
+simulated startup timeout, and confirming no server thread or listening
+socket survives `stop()`.
 
 ## Components
 
