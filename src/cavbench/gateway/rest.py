@@ -168,37 +168,54 @@ def make_handler(session: GatewaySession) -> type[BaseHTTPRequestHandler]:
     return GatewayRequestHandler
 
 
-# How often serve_forever()'s internal select() loop re-checks the
-# shutdown flag when idle. Small enough that the startup handshake below
-# resolves near-instantly; irrelevant to request-handling latency, since
-# a ready connection is always handled as soon as select() reports it,
-# regardless of this value.
+# How often the request loop below re-checks the cancellation flag when
+# idle. Small enough that the startup handshake resolves near-instantly
+# and cleanup notices cancellation quickly; irrelevant to request-handling
+# latency, since a ready connection is always handled as soon as it is
+# reported, regardless of this value.
 _POLL_INTERVAL_SECONDS = 0.05
 _STARTUP_TIMEOUT_SECONDS = 5.0
 _SHUTDOWN_JOIN_TIMEOUT_SECONDS = 5.0
 
 
-class _HandshakingHTTPServer(HTTPServer):
-    """An `HTTPServer` that signals when `serve_forever()` has genuinely
-    entered its request loop.
+class _ManagedHTTPServer(HTTPServer):
+    """An `HTTPServer` driven by an explicit, always-safe-to-signal
+    cancellation event instead of `serve_forever()`'s private shutdown
+    handshake.
 
-    `service_actions()` is a documented `socketserver.BaseServer`
-    extension point, called once per `serve_forever()` loop iteration --
-    always *after* that iteration's `select()` call returns, so its first
-    invocation is authoritative proof the loop is actually running (not
-    just that the thread was scheduled). This is what closes the
-    startup race: without it, `start()` could return -- and a
-    same-caller `stop()` could then call `shutdown()` -- before
-    `serve_forever()` had reached the point where `shutdown()` is safe to
-    call at all (see `GatewayRestServer` docstring).
+    `run()` replaces `serve_forever()` with a loop built from the public,
+    documented `handle_request()` primitive (one request, or a
+    `self.timeout`-bounded no-op if none arrives) -- the same idiom the
+    stdlib docs suggest for a cancellable server loop. `_cancel` can be
+    `set()` at *any* time, including before `run()` has even started on
+    its thread: the very first loop check will then exit immediately.
+    This is what makes cleanup after a startup failure sound -- unlike
+    `HTTPServer.shutdown()`, which blocks forever if called before
+    `serve_forever()` has genuinely begun, signaling `_cancel` is never
+    itself a blocking or racy operation.
+
+    `running_confirmed` is set as the first statement inside `run()`,
+    which -- because it necessarily executes on the server thread -- is
+    authoritative proof the loop has actually started (not just that the
+    thread was scheduled).
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.running_confirmed = threading.Event()
+        self._cancel = threading.Event()
 
-    def service_actions(self) -> None:
+    def run(self, *, poll_interval: float = _POLL_INTERVAL_SECONDS) -> None:
+        self.timeout = poll_interval
         self.running_confirmed.set()
+        while not self._cancel.is_set():
+            self.handle_request()
+
+    def request_cancellation(self) -> None:
+        """Always safe to call, from any thread, at any time -- including
+        before `run()` has started, while it is running, or after it has
+        already exited."""
+        self._cancel.set()
 
 
 class GatewayRestServer:
@@ -213,8 +230,9 @@ class GatewayRestServer:
     `NonLoopbackBindError`. Remote-candidate (non-loopback) mode is out of
     scope for this milestone.
 
-    Uses `http.server.HTTPServer` (never `ThreadingHTTPServer`): requests
-    are handled one at a time, in full, before the next is accepted -- see
+    Built on `http.server.HTTPServer` (never `ThreadingHTTPServer`), via
+    `_ManagedHTTPServer.run()` rather than `serve_forever()`: requests are
+    handled one at a time, in full, before the next is accepted -- see
     module docstring for the exact concurrency contract. `socketserver.
     TCPServer.__init__` already binds and listens on the socket, so it
     exists (and must eventually be closed) even if `start()` is never
@@ -224,38 +242,65 @@ class GatewayRestServer:
     single lock so `start()`/`stop()` calls from competing threads
     serialize deterministically rather than racing:
 
-    - `start()` launches the server thread and **blocks until
-      `serve_forever()` has confirmed it is actually running** (via
-      `_HandshakingHTTPServer`'s `service_actions()` handshake) or a
-      bounded startup timeout elapses, in which case it tears the server
-      down and raises `ServerLifecycleError`. `start()` never returns
-      while the server's running-state is still ambiguous -- this is
-      what closes the startup race: `HTTPServer.shutdown()` blocks
-      forever if called before `serve_forever()` has genuinely begun
-      (the original hang bug), so `stop()` must never be allowed to see
-      "running" until that is actually true.
-    - `stop()` before `start()` (or during a state where `start()` never
-      confirmed running) only closes the listening socket -- no
-      `shutdown()` call, no hang.
+    - `start()` launches the server thread and **blocks until `run()` has
+      confirmed it is actually running** (`_ManagedHTTPServer.
+      running_confirmed`) or a bounded startup timeout elapses. On
+      timeout, `start()` runs the same cleanup `stop()` would (signal
+      cancellation, join the thread with a bounded timeout, close the
+      socket exactly once) *before* raising `ServerLifecycleError` --
+      it never leaves a launched thread unaccounted for. If the thread
+      still has not terminated after that bounded join (only reachable
+      under extreme scheduling starvation, since the loop's cancellation
+      check is on the order of `poll_interval`), `start()` raises a
+      distinct `ServerLifecycleError` stating startup failed *and* the
+      server thread could not be terminated, rather than silently
+      claiming clean teardown.
+    - `stop()` before `start()` (or after a startup failure) is
+      idempotent and harmless: cancellation is signaled (a no-op if
+      nothing is running), there is nothing to join, and the socket is
+      closed exactly once.
     - `start()` while already running is an idempotent no-op; `start()`
-      after `stop()` raises `ServerLifecycleError` (restarting a stopped
-      `HTTPServer` is not supported).
-    - `stop()` is idempotent and calls `server_close()` exactly once.
-    - Because both methods hold the same lock for their full duration
-      (including any bounded wait), a `stop()` racing a `start()` simply
-      waits for `start()` to finish resolving to a definite state first
-      -- there is no window where `stop()` can observe or act on an
-      ambiguous "maybe running" state.
+      after `stop()` (including after a startup failure, which also
+      transitions to the terminal `stopped` state) raises
+      `ServerLifecycleError`.
+    - `stop()` is idempotent and calls `server_close()` exactly once,
+      guarded by an internal flag independent of `_state` so repeated
+      calls -- including after a startup-failure cleanup already ran --
+      never double-close.
+    - Because `start()` and `stop()` hold the same lock for their full
+      duration (including any bounded wait), a `stop()` racing a
+      `start()` simply waits for `start()` to finish resolving to a
+      definite state first -- there is no window where `stop()` can
+      observe or act on an ambiguous "maybe running" state.
+    - One internal `_cleanup()` implements the signal-join-close sequence
+      exactly once; `start()`'s timeout path, `stop()`, and (via `stop()`)
+      context-manager exit all call it, so there is exactly one place
+      that can leak a thread or a socket, and it is exercised by every
+      lifecycle path's tests.
     """
 
-    def __init__(self, session: GatewaySession, *, host: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(
+        self,
+        session: GatewaySession,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        _server_class: type[_ManagedHTTPServer] = _ManagedHTTPServer,
+    ) -> None:
+        """`_server_class` is a private, test-only extension point (note
+        the leading underscore -- never a supported production
+        parameter): it lets tests install a `_ManagedHTTPServer` subclass
+        *before* any socket is bound, so a test can observe or delay the
+        startup handshake without ever constructing (and thus leaking) a
+        separate, unused default server instance."""
         validate_loopback_host(host)
         self._session = session
         handler = make_handler(session)
-        self._httpd = _HandshakingHTTPServer((host, port), handler)
+        self._httpd = _server_class((host, port), handler)
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._state = "created"  # "created" | "running" | "stopped"
+        self._closed = False
 
     @property
     def base_url(self) -> str:
@@ -275,7 +320,7 @@ class GatewayRestServer:
                 return  # idempotent: already running
 
             self._thread = threading.Thread(
-                target=self._httpd.serve_forever,
+                target=self._httpd.run,
                 kwargs={"poll_interval": _POLL_INTERVAL_SECONDS},
                 daemon=True,
             )
@@ -284,13 +329,18 @@ class GatewayRestServer:
             confirmed = self._httpd.running_confirmed.wait(timeout=_STARTUP_TIMEOUT_SECONDS)
             if not confirmed:
                 # The thread was launched but never proved it reached
-                # serve_forever()'s loop -- do not leave the server in an
-                # ambiguous state. There is nothing safe to join here
-                # (shutdown() is exactly the call that could hang), so
-                # the only deterministic recovery is closing the socket
-                # and surfacing a clear error.
+                # run()'s loop. Tear it down completely before raising --
+                # request_cancellation() is always safe to call regardless
+                # of whether the thread has started, so this never risks
+                # the hang a premature shutdown() call would.
                 self._state = "stopped"
-                self._httpd.server_close()
+                terminated = self._cleanup(join_timeout=_STARTUP_TIMEOUT_SECONDS)
+                if not terminated:
+                    raise ServerLifecycleError(
+                        f"GatewayRestServer startup failed (no confirmation within "
+                        f"{_STARTUP_TIMEOUT_SECONDS}s) and the server thread could not be "
+                        f"terminated within {_STARTUP_TIMEOUT_SECONDS}s"
+                    )
                 raise ServerLifecycleError(
                     f"GatewayRestServer did not confirm startup within {_STARTUP_TIMEOUT_SECONDS}s"
                 )
@@ -300,17 +350,29 @@ class GatewayRestServer:
     def stop(self) -> None:
         with self._lock:
             if self._state == "stopped":
-                return  # idempotent
-            was_running = self._state == "running"
+                self._cleanup(join_timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)  # idempotent no-op if already clean
+                return
             self._state = "stopped"
-            if was_running:
-                # Safe precisely because `start()` never returns (and
-                # therefore never lets `_state` become "running") until
-                # `running_confirmed` is set.
-                self._httpd.shutdown()
-                if self._thread is not None:
-                    self._thread.join(timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)
+            self._cleanup(join_timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)
+
+    def _cleanup(self, *, join_timeout: float) -> bool:
+        """Signal cancellation (always safe), join the server thread
+        (bounded), and close the listening socket exactly once. Returns
+        `True` if the thread is confirmed no longer alive (or was never
+        started) -- `False` only if it is still alive after the bounded
+        join, which callers must treat as a real failure to terminate,
+        never silently ignore. Never relies on daemon-thread process exit
+        for correctness: this method itself proves the thread is gone
+        (or reports that it could not confirm that) before returning."""
+        self._httpd.request_cancellation()
+        thread_alive = False
+        if self._thread is not None:
+            self._thread.join(timeout=join_timeout)
+            thread_alive = self._thread.is_alive()
+        if not self._closed:
+            self._closed = True
             self._httpd.server_close()
+        return not thread_alive
 
     def __enter__(self) -> GatewayRestServer:
         self.start()
