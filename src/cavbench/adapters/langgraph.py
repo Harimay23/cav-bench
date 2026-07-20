@@ -4,14 +4,18 @@
 for the full design (event mapping, scenario flows, durability/idempotency
 requirements) and Issue #5 for implementation tracking.
 
-Trust boundary (unchanged from every other adapter -- see
-``cavbench.adapters.protocol`` and ``docs/architecture.md``): CAV-Bench's
-own tool facade (``AdapterSession.tools``) is the only authoritative source
-of commit truth. LangGraph's own runtime state -- checkpoints, node
-outputs, retry counts -- may only ever be used by this adapter to decide
-*how* to call the tool facade (e.g. deriving a stable idempotency key from
-checkpointed thread/node identity). It is never trusted as evidence that an
-effect validly committed, and ``DeterministicEvaluator`` never sees it.
+Adapter-visible trust boundary (unchanged from every other adapter -- see
+``cavbench.adapters.protocol`` and ``docs/architecture.md``):
+``AdapterSession.tools`` is the adapter's only execution path into the
+benchmark environment. Authoritative attempt and commit truth is owned by
+``BenchmarkEnvironment`` and recorded in the canonical trace and
+side-effect ledger -- the tool facade itself records nothing; it delegates
+and relays results. LangGraph runtime state -- checkpoints, node outputs,
+retry counts -- remains untrusted ordering, retry, and resume context only:
+it may only ever be used by this adapter to decide *how* to call the tool
+facade (e.g. deriving a stable idempotency key from checkpointed
+thread/node identity), never as evidence that an effect validly committed,
+and ``DeterministicEvaluator`` never sees it.
 
 LangGraph is an optional dependency: importing this module, and importing
 ``cavbench`` generally, must never require LangGraph to be installed. This

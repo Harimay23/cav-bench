@@ -56,20 +56,40 @@ def test_langgraph_adapter_satisfies_the_execution_adapter_protocol() -> None:
     assert isinstance(adapter.version, str) and adapter.version
 
 
-def test_langgraph_adapter_run_raises_clear_missing_dependency_error_when_langgraph_not_installed() -> None:
-    """langgraph is not installed anywhere in CI or this test environment,
-    so this exercises the real missing-dependency path, not a simulated
-    one. The error must clearly identify the optional LangGraph
-    requirement and point to the mapping documentation."""
-    from cavbench.adapters.langgraph import LangGraphAdapter
+def test_langgraph_adapter_run_raises_clear_missing_dependency_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The missing-package path is simulated deterministically, via
+    monkeypatching, rather than depending on whether the real developer or
+    CI environment happens to have langgraph installed -- this test must
+    pass either way."""
+    import cavbench.adapters.langgraph as langgraph_adapter_module
+
+    class _MissingLangGraphImportlib:
+        @staticmethod
+        def import_module(name: str) -> object:
+            assert name == "langgraph"
+            raise ModuleNotFoundError(
+                "No module named 'langgraph'",
+                name="langgraph",
+            )
+
+    monkeypatch.setattr(
+        langgraph_adapter_module,
+        "importlib",
+        _MissingLangGraphImportlib(),
+    )
 
     scenario = PACK.get("HP-01")
-    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-skeleton-test-missing-dependency")
+    env = BenchmarkEnvironment(
+        scenario,
+        seed=0,
+        run_id="langgraph-skeleton-test-missing-dependency",
+    )
     session = AdapterSession(scenario.view, ToolFacade(env))
 
-    adapter = LangGraphAdapter()
     with pytest.raises(ImportError) as exc_info:
-        adapter.run(session)
+        langgraph_adapter_module.LangGraphAdapter().run(session)
 
     message = str(exc_info.value).lower()
     assert "langgraph" in message

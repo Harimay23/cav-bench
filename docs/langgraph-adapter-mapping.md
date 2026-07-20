@@ -26,12 +26,20 @@ presented as one (see [Non-goals](#non-goals)).
 ## Trust boundary
 
 Unchanged from every other adapter (`docs/architecture.md`,
-`docs/adapter-authoring.md`): the **CAV-Bench session/tool facade is the
-sole authoritative source of commit truth.** Every consequential effect the
-adapter causes is committed exclusively through
-`session.tools.write(...)` → `ToolFacade` → `BenchmarkEnvironment`, which is
-the only code path that can append to the side-effect ledger or emit a
-`side_effect_commit` trace event.
+`docs/adapter-authoring.md`), with a precise split between the
+adapter-visible path and where truth actually lives:
+
+- **The CAV-Bench tool facade is the sole adapter-visible execution path**
+  for reads, writes, reconciliation, clarification, and escalation. Every
+  consequential effect the adapter causes is issued exclusively through
+  `session.tools.write(...)` → `ToolFacade` → `BenchmarkEnvironment`.
+- **`BenchmarkEnvironment`, the canonical trace, and the side-effect ledger
+  are the authoritative sources of attempted and committed-effect truth.**
+  `BenchmarkEnvironment` is the only component that can append to the
+  side-effect ledger or emit `tool_call_attempt` / `side_effect_commit`
+  trace events (`src/cavbench/runtime/environment.py`). `ToolFacade.write()`
+  itself records nothing — it delegates to `BenchmarkEnvironment.commit()`
+  and relays back the result (`src/cavbench/runtime/tools.py`).
 
 **LangGraph's own runtime state — checkpoints, node outputs, retry counts,
 `get_state()`/`get_state_history()` — provides ordering, attempt, retry,
@@ -63,7 +71,7 @@ this is out of scope for the design-stage skeleton.
 | `authority_checked` | An explicit, externally observable authorization decision point — typically an `interrupt()` / `Command(resume=...)` step. This makes the decision *observable*; it is **not itself authorization truth**. See [Authority: observability versus truth](#authority-observability-versus-truth). |
 | `state_read` | A node's read via a CAV-Bench tool call (`session.tools.read(...)`), captured in that node's output. |
 | `state_revalidated` | A node that re-reads state and semantically re-evaluates the action immediately before a commit-issuing node. See [Stale-state TOCTOU protection](#stale-state-toctou-protection) — this alone does not close the race. |
-| `effect_attempted` | Authoritative only when recorded synchronously at `session.tools.write(...)` (`ToolFacade.write()`) entry, before `BenchmarkEnvironment` applies the effect. `on_tool_start`/`astream_events` and task-stream (`stream_mode="tasks"`) evidence are *corroborating ordering evidence only* — see [Evidence spine](#evidence-spine-attempted-versus-committed). |
+| `effect_attempted` | Backed by the benchmark-owned `tool_call_attempt` trace event, recorded synchronously near the beginning of `BenchmarkEnvironment.commit()` — after `ToolFacade.write()` delegates the operation and before the environment applies fault hooks, validation checks, idempotency checks, or external effects. `on_tool_start`/`astream_events` and task-stream (`stream_mode="tasks"`) evidence are *corroborating ordering evidence only* — see [Evidence spine](#evidence-spine-attempted-versus-committed). |
 | `effect_committed` | Authoritative only when backed by the benchmark-owned `side_effect_commit` trace event / side-effect ledger — never from a LangGraph-reported fact. `ToolResult.status="COMMITTED"` gives the adapter immediate confirmation; `status="AMBIGUOUS"` gives it neither confirmation nor disconfirmation and requires reconciliation. See [Trust boundary](#trust-boundary) and [Evidence spine](#evidence-spine-attempted-versus-committed). |
 | `effect_reconciled` | A node that calls `session.tools.status_check(...)` with the same stable operation identity, performed **unconditionally** before any retry — see [Stable operation identity and reconciliation](#stable-operation-identity-and-reconciliation). |
 | `compensation_started` / `compensation_completed` | A dedicated compensation node, reached via a conditional edge when a downstream node reports failure. |
@@ -73,19 +81,25 @@ this is out of scope for the design-stage skeleton.
 ## Evidence spine: attempted versus committed
 
 The **single authoritative evidence spine** for `effect_attempted`,
-`effect_committed`, and ambiguous-commit reconciliation is the adapter's
-own call into the tool facade and the benchmark-owned records that call
-produces — never anything LangGraph observes about itself.
+`effect_committed`, and ambiguous-commit reconciliation is
+`BenchmarkEnvironment`'s own records — the canonical trace and side-effect
+ledger — produced when the adapter calls through the tool facade, never
+anything LangGraph observes about itself. The tool facade is the adapter's
+only path to *trigger* these records; it is not itself where the evidence
+lives.
 
 ### Attempt evidence
 
-`effect_attempted` is authoritative **only** when recorded synchronously at
-`ToolFacade.write()` entry, before `BenchmarkEnvironment` applies the
-effect. `on_tool_start` (from `astream_events`) and task-stream events
-(`stream_mode="tasks"`) are **corroborating ordering evidence only** —
-useful for reconstructing *when* things happened relative to each other,
-never a substitute for that fact. This is load-bearing, not cautious
-phrasing, for two reasons:
+`effect_attempted` is backed by the benchmark-owned `tool_call_attempt`
+trace event, recorded synchronously near the beginning of
+`BenchmarkEnvironment.commit()` — after `ToolFacade.write()` delegates the
+operation and before the environment applies fault hooks, validation
+checks, idempotency checks, or external effects
+(`src/cavbench/runtime/environment.py`). `on_tool_start` (from
+`astream_events`) and task-stream events (`stream_mode="tasks"`) are
+**corroborating ordering evidence only** — useful for reconstructing *when*
+things happened relative to each other, never a substitute for that fact.
+This is load-bearing, not cautious phrasing, for two reasons:
 
 - **A plain graph node that calls `session.tools.write(...)` directly (not
   through a LangChain-wrapped `Tool`) may emit no `on_tool_start` event at
@@ -387,18 +401,19 @@ it does not, by itself, distinguish "the external system confirmed this
 effect committed" from "the node believes it committed" or "the node timed
 out without knowing." `session.tools.write(...)`'s returned
 `ToolResult.status` (`COMMITTED` / `CONFLICT` / `AMBIGUOUS` /
-`IDEMPOTENT_REPLAY` / `FAILED`, per `docs/adapter-authoring.md`) is what the
-adapter must treat as attempted-vs-committed evidence, never the node's own
-control flow having "succeeded" — but that response only fully closes the
-gap when it is `COMMITTED`. An `AMBIGUOUS` response leaves the adapter with
-neither confirmation nor disconfirmation; it must reconcile via
-`status_check(...)` rather than guess, and the benchmark-owned trace and
-ledger remain the actual authority regardless of what the adapter guesses
-(see [Evidence spine](#evidence-spine-attempted-versus-committed)). This is
-the same distinction [Trust boundary](#trust-boundary) describes generally
-and [Evidence spine](#evidence-spine-attempted-versus-committed) describes
-mechanically; it is called out separately here because it is the most
-common way a framework integration would accidentally re-introduce a
+`IDEMPOTENT_REPLAY` / `FAILED`, per `docs/adapter-authoring.md`) is the
+adapter-visible signal reflecting `BenchmarkEnvironment`'s own record, and
+is what the adapter must act on, never the node's own control flow having
+"succeeded" — but that signal only fully closes the gap when it is
+`COMMITTED`. An `AMBIGUOUS` response leaves the adapter with neither
+confirmation nor disconfirmation; it must reconcile via `status_check(...)`
+rather than guess, and the benchmark-owned trace and ledger — not
+`ToolResult` itself — remain the actual authority regardless of what the
+adapter guesses (see [Evidence spine](#evidence-spine-attempted-versus-committed)).
+This is the same distinction [Trust boundary](#trust-boundary) describes
+generally and [Evidence spine](#evidence-spine-attempted-versus-committed)
+describes mechanically; it is called out separately here because it is the
+most common way a framework integration would accidentally re-introduce a
 self-grading path.
 
 ## External review status
@@ -424,6 +439,23 @@ case, and (2) commit-boundary authority enforcement. Both are now corrected
 [Authority: observability versus truth](#authority-observability-versus-truth)
 respectively — without disputing the reviewer's identification of the
 target properties themselves.
+
+A second follow-up self-review found the document was still inconsistent
+about *where* commit truth lives: several passages described the tool
+facade itself as the "authoritative source of commit truth" and said
+`effect_attempted` was recorded "at `ToolFacade.write()` entry." Per
+`src/cavbench/runtime/tools.py` and `src/cavbench/runtime/environment.py`,
+`ToolFacade.write()` records nothing itself — it delegates to
+`BenchmarkEnvironment.commit()`, which records `tool_call_attempt` near the
+beginning of its own execution and owns `side_effect_commit` and the
+side-effect ledger. Corrected throughout to the precise split: the tool
+facade is the sole *adapter-visible execution path*; `BenchmarkEnvironment`,
+the canonical trace, and the side-effect ledger are the *authoritative
+sources of attempted and committed-effect truth*. The missing-LangGraph-
+dependency skeleton test was also made deterministic (previously it
+depended on LangGraph actually being absent from the test environment; it
+now simulates that path via monkeypatching regardless of what is
+installed).
 
 This is **not**: official LangChain endorsement, official LangGraph
 endorsement, LangGraph maintainer approval, adoption, or production
