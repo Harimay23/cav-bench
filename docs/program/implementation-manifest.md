@@ -74,11 +74,14 @@ its own PRs, and must not be modified by executors working this queue.
   topology and REST-first transport order; a `DECISION_LOG.md` entry at
   implementation time recording both remains required (per `AGENTS.md`
   scope discipline and approval Condition 1).
-- **current status:** `IMPLEMENTING` (transitioned from
-  `APPROVED_FOR_IMPLEMENTATION` at execution journal
-  `docs/program/journal/execution-journal.jsonl` checkpoint `ckpt-0001` on
-  branch `feat/generic-protocol-integration`, base `origin/main`
-  `7d55cc9666a403571f048ed3ca50aa309f8a977b`)
+- **current status:** `PR_OPEN` (transitioned
+  `APPROVED_FOR_IMPLEMENTATION` → `IMPLEMENTING` → `PR_OPEN` at execution
+  journal `docs/program/journal/execution-journal.jsonl` checkpoints
+  `ckpt-0001`/`ckpt-0002`, branch `feat/generic-protocol-integration`,
+  base `origin/main` `7d55cc9666a403571f048ed3ca50aa309f8a977b`, draft PR
+  [#12](https://github.com/Harimay23/cav-bench/pull/12). Marking the PR
+  ready for review and merging remain human decisions per
+  `gate-state.md`; no further milestone work proceeds from this state.)
 - **allowed actions:** new optional-extra modules for the gateway core
   and first transport frontend; deterministic reference candidate client
   (examples-adjacent); CI example job; documentation; changelog +
