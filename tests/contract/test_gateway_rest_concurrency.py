@@ -1,14 +1,28 @@
-"""Concurrent-request determinism tests (M-GPI-1 review follow-up).
+"""Concurrent-request serialization tests (M-GPI-1 review follow-up).
 
 `GatewayRestServer` was switched from `http.server.ThreadingHTTPServer`
 to plain `http.server.HTTPServer` (see `cavbench.gateway.rest` module
 docstring): every request handler shares one mutable `GatewaySession`
 (its `BenchmarkEnvironment`, `ToolFacade`, idempotency map, final-report
-state, and session log), so concurrent handling would make request
-order, commit order, trace order, and session-log ordering
-nondeterministic. A single-threaded server processes one connection
-fully before accepting the next, so "simultaneous" client requests are
-still, by construction, handled strictly one at a time.
+state, and session log), so concurrent handling would make commit order,
+trace order, and session-log ordering nondeterministic. A single-threaded
+server processes one connection fully before accepting the next, so
+"simultaneous" client requests are still, by construction, handled
+strictly one at a time.
+
+**What these tests do and do not claim** (see
+`cavbench.gateway.rest` module docstring, "The concurrency contract,
+precisely"): they prove there is never any *overlap* between requests,
+that every accepted request still maps to exactly one `ToolFacade` call,
+and that the resulting benchmark state (effect count, log-entry shapes)
+is the same regardless of run. They do **not** claim a specific,
+reproducible *order* in which concurrently-fired requests get processed
+-- that order is whatever `http.server.HTTPServer` happens to accept the
+underlying TCP connections in, which this suite does not control and
+does not need to for the properties it checks. A candidate that wants a
+reproducible ordered trace must itself send one request at a time and
+wait for each response, exactly as the reference candidate and every
+baseline profile already do.
 
 These tests fire several requests from separate client threads at once
 and prove the server-side handling never actually overlaps, using an
@@ -146,6 +160,13 @@ def test_accepted_concurrent_requests_still_map_one_to_one_to_tool_facade_calls(
 
 
 def test_log_sequence_numbers_are_unique_contiguous_and_reflect_processing_order() -> None:
+    """"Processing order" here means the actual server-side order in
+    which `GatewaySession.handle` was called for each request -- i.e.
+    whatever order `http.server.HTTPServer` accepted the underlying TCP
+    connections in. This test does not assert what that order *is*
+    (client-submission order is not controlled or predicted), only that
+    the log records exactly one contiguous, gap-free, duplicate-free
+    sequence matching it."""
     scenario = PACK.get("ER-04")
     session = GatewaySession.start(scenario, seed=0, run_id="concurrency-seq")
 
@@ -154,7 +175,7 @@ def test_log_sequence_numbers_are_unique_contiguous_and_reflect_processing_order
         _fire_concurrently(server, envelopes)
 
     seqs = [entry.seq for entry in session.log.entries]
-    assert seqs == list(range(len(seqs))), "sequence numbers must be unique, contiguous, and in processing order"
+    assert seqs == list(range(len(seqs))), "sequence numbers must be unique, contiguous, and in actual processing order"
 
 
 def test_environment_and_ledger_operations_do_not_overlap_under_concurrent_requests() -> None:
@@ -185,14 +206,18 @@ def test_environment_and_ledger_operations_do_not_overlap_under_concurrent_reque
 
 
 def test_repeated_concurrent_request_runs_produce_deterministic_final_state() -> None:
-    """True wire-arrival order across independent TCP connections is not
-    something this test controls (nor needs to: the requests target
-    independent, commutative resources). What must be deterministic --
-    and is checked here across two independent runs -- is the *resulting*
-    benchmark state: the same set of committed effects, the same
-    tool_facade_call_count, and the same log-entry action/resource
-    content, regardless of which physical order the OS happened to
-    deliver connections in."""
+    """This test does **not** claim a reproducible ordered trace -- see
+    module docstring. All 8 requests target the *same* resource
+    (`inventory:SKU-4004`), distinguished only by
+    `operation_id`/`idempotency_key`/`correlation_id`; which physical
+    order `http.server.HTTPServer` happened to accept their TCP
+    connections in is neither controlled nor asserted here. What must be
+    (and is, across two independent runs) deterministic is the
+    *resulting* benchmark state: the same `tool_facade_call_count`, the
+    same number of committed ledger effects, and the same set of
+    log-entry (action, normalized_status) shapes -- because every write
+    commits unconditionally (no `expected_version` guard) regardless of
+    which relative order the 8 otherwise-independent commits landed in."""
 
     def run_once(run_id: str) -> tuple[int, int, frozenset[tuple[str, ...]]]:
         scenario = PACK.get("ER-04")
