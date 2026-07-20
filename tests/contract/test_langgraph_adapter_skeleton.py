@@ -1,14 +1,18 @@
 """Contract tests for the design-stage LangGraph adapter skeleton.
 
 These do not test LangGraph integration behavior (there isn't any yet --
-see docs/langgraph-adapter-mapping.md). They test the three properties the
+see docs/langgraph-adapter-mapping.md). They test the properties the
 skeleton is required to have: it satisfies the ExecutionAdapter protocol
-shape, it never makes LangGraph a hard dependency of importing cavbench,
-and it fails honestly rather than fabricating a result.
+shape, it never makes LangGraph a hard dependency of importing cavbench
+(verified in a clean subprocess, not just the parent pytest process), it
+fails honestly rather than fabricating a result, and it does not
+misattribute a nested import failure inside langgraph to "langgraph is not
+installed".
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 
 import pytest
@@ -22,21 +26,25 @@ from cavbench.scenarios.loader import load_builtin_pack
 PACK = load_builtin_pack("core-v1")
 
 
-def test_langgraph_module_is_not_already_imported() -> None:
-    """Sanity check on the test environment itself: if this fails, some
-    other test already imported langgraph and the isolation tests below
-    would not be meaningful."""
-    assert "langgraph" not in sys.modules
-
-
-def test_importing_the_adapter_module_does_not_require_or_import_langgraph() -> None:
-    # Re-import is safe/idempotent even if another test already imported it.
-    import cavbench.adapters.langgraph  # noqa: F401
-
-    assert "langgraph" not in sys.modules, (
-        "importing cavbench.adapters.langgraph must not eagerly import langgraph -- "
-        "LangGraph is an optional dependency (docs/langgraph-adapter-mapping.md)"
+def test_importing_the_adapter_module_in_a_clean_subprocess_never_imports_langgraph() -> None:
+    """Runs in a fresh interpreter -- not the parent pytest process -- so
+    the isolation guarantee cannot be invalidated by test execution order
+    or by something else in this process having already imported
+    langgraph."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import cavbench.adapters.langgraph\n"
+            "import sys\n"
+            "assert 'langgraph' not in sys.modules, "
+            "'importing cavbench.adapters.langgraph must not import langgraph'\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
 def test_langgraph_adapter_satisfies_the_execution_adapter_protocol() -> None:
@@ -48,19 +56,25 @@ def test_langgraph_adapter_satisfies_the_execution_adapter_protocol() -> None:
     assert isinstance(adapter.version, str) and adapter.version
 
 
-def test_langgraph_adapter_run_fails_clearly_instead_of_fabricating_a_result() -> None:
+def test_langgraph_adapter_run_raises_clear_missing_dependency_error_when_langgraph_not_installed() -> None:
+    """langgraph is not installed anywhere in CI or this test environment,
+    so this exercises the real missing-dependency path, not a simulated
+    one. The error must clearly identify the optional LangGraph
+    requirement and point to the mapping documentation."""
     from cavbench.adapters.langgraph import LangGraphAdapter
 
     scenario = PACK.get("HP-01")
-    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-skeleton-test")
+    env = BenchmarkEnvironment(scenario, seed=0, run_id="langgraph-skeleton-test-missing-dependency")
     session = AdapterSession(scenario.view, ToolFacade(env))
 
     adapter = LangGraphAdapter()
-    with pytest.raises((ImportError, NotImplementedError)) as exc_info:
+    with pytest.raises(ImportError) as exc_info:
         adapter.run(session)
 
-    message = str(exc_info.value)
-    assert message, "the raised error must carry a clear, non-empty explanation"
+    message = str(exc_info.value).lower()
+    assert "langgraph" in message
+    assert "optional" in message
+    assert "docs/langgraph-adapter-mapping.md" in message
 
 
 def test_langgraph_adapter_run_raises_not_implemented_once_langgraph_is_available(
@@ -86,3 +100,28 @@ def test_langgraph_adapter_run_raises_not_implemented_once_langgraph_is_availabl
     message = str(exc_info.value).lower()
     assert "graph" in message
     assert "no graph implementation yet" in message
+
+
+def test_ensure_langgraph_installed_reraises_nested_import_failure_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ModuleNotFoundError raised from *inside* langgraph (e.g. one of
+    its own missing dependencies) is a different failure mode than
+    "langgraph itself is not installed", and must propagate unchanged --
+    not be reworded into the optional-dependency message."""
+    import cavbench.adapters.langgraph as langgraph_adapter_module
+
+    class _FakeImportlib:
+        @staticmethod
+        def import_module(name: str) -> object:
+            raise ModuleNotFoundError(
+                "No module named 'some_nested_dependency'", name="some_nested_dependency"
+            )
+
+    monkeypatch.setattr(langgraph_adapter_module, "importlib", _FakeImportlib())
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        langgraph_adapter_module._ensure_langgraph_installed()
+
+    assert exc_info.value.name == "some_nested_dependency"
+    assert "some_nested_dependency" in str(exc_info.value)

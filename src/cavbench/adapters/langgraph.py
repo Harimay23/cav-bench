@@ -22,6 +22,8 @@ implemented.
 
 from __future__ import annotations
 
+import importlib
+
 from cavbench.adapters.protocol import AdapterResult
 from cavbench.runtime.session import AdapterSession
 
@@ -36,10 +38,18 @@ def _ensure_langgraph_installed() -> None:
     this is what keeps LangGraph an optional dependency of CAV-Bench. Raises
     a clear, specific error rather than letting a bare ``ModuleNotFoundError``
     surface with no context.
+
+    Only a ``ModuleNotFoundError`` for ``langgraph`` itself is treated as
+    "not installed" -- a ``ModuleNotFoundError`` raised from *inside*
+    langgraph (e.g. one of its own missing dependencies) is a different
+    failure mode and must propagate unchanged rather than being misreported
+    as "langgraph is not installed".
     """
     try:
-        import langgraph  # type: ignore[import-not-found]  # noqa: F401
-    except ImportError as exc:
+        importlib.import_module("langgraph")
+    except ModuleNotFoundError as exc:
+        if exc.name != "langgraph":
+            raise
         raise ImportError(
             "LangGraphAdapter requires the optional 'langgraph' package, "
             "which is not installed and is not a core CAV-Bench dependency. "
