@@ -12,20 +12,34 @@ entry's status and merge prerequisites permit. Statuses use
 [`gate-state.md`](gate-state.md).
 
 Initial statuses below reflect real dependencies as of this document.
-**Three milestones — `M-GPI-1`, `M-COM-V1`, and `M-IVT-1` — are now
-`APPROVED_FOR_IMPLEMENTATION`**, per the recorded human design-approval
-records in [`approvals/`](approvals/) (see each entry below for its
-record link). No implementation has begun under any of these approvals.
-`M-HFA-1`, `M-IET-1`, and `M-REL-NEXT` remain unapproved. The manifest may
-carry multiple `APPROVED_FOR_IMPLEMENTATION` entries at once; the work
+**Three milestones — `M-GPI-1`, `M-COM-V1`, and `M-IVT-1` — are
+`APPROVED_FOR_IMPLEMENTATION` (or, for `M-GPI-1`, past it — see below)**,
+per the recorded human design-approval records in
+[`approvals/`](approvals/) (see each entry below for its record link).
+**Implementation has begun and merged for `M-GPI-1`** (PR
+[#12](https://github.com/Harimay23/cav-bench/pull/12), tracking issue
+[#11](https://github.com/Harimay23/cav-bench/issues/11), closed as
+implementation-completed): the milestone's code is on `main`, but it
+remains at the `VALIDATING` gate-state because its recorded external
+technical review has not occurred — see its entry below. No
+implementation has begun for `M-COM-V1` or `M-IVT-1`. `M-HFA-1`,
+`M-IET-1`, and `M-REL-NEXT` remain unapproved. The manifest may carry
+multiple `APPROVED_FOR_IMPLEMENTATION` entries at once; the work
 selection algorithm in
 [`fable-execution-contract.md`](fable-execution-contract.md) still
 chooses exactly one earliest-eligible milestone at a time — multiple
 approved entries do not authorize parallel or out-of-order execution.
 Branch names and PR titles are proposed per
 [`pr-and-branch-strategy.md`](pr-and-branch-strategy.md) and become fixed
-at design approval. Issue references are placeholders until issues are
-opened.
+at design approval. Issue references below are the real, opened GitHub
+issue numbers (`M-GPI-1` → [#11](https://github.com/Harimay23/cav-bench/issues/11),
+`M-COM-V1` → [#13](https://github.com/Harimay23/cav-bench/issues/13),
+`M-IVT-1` → [#14](https://github.com/Harimay23/cav-bench/issues/14),
+`M-HFA-1` → [#15](https://github.com/Harimay23/cav-bench/issues/15),
+`M-IET-1` → [#16](https://github.com/Harimay23/cav-bench/issues/16),
+`M-REL-NEXT` → [#17](https://github.com/Harimay23/cav-bench/issues/17));
+opening a tracking issue for the three still-unapproved milestones does
+not itself authorize their implementation — see each entry below.
 
 Statuses in this file change only through commits that record the
 authorizing evidence per `gate-state.md` — never silently.
@@ -36,23 +50,41 @@ authorizing evidence per `gate-state.md` — never silently.
 `M-GPI-1` → `M-COM-V1` → `M-IVT-1` → `M-HFA-1` → `M-IET-1` → `M-REL-NEXT`.
 This ordering, together with each entry's dependency and eligibility
 state, is what the Fable execution contract's selection algorithm reads
-to pick the next milestone: as of this document, **`M-GPI-1` is the
-first eligible milestone** (`APPROVED_FOR_IMPLEMENTATION`, no unresolved
-dependency milestones, no pending external prerequisite gating entry into
-`IMPLEMENTING`).
+to pick the next milestone. `M-GPI-1` has completed implementation (PR
+[#12](https://github.com/Harimay23/cav-bench/pull/12) merged, tracking
+issue [#11](https://github.com/Harimay23/cav-bench/issues/11) closed) and
+is no longer selectable by the work-selection algorithm — it now sits at
+`VALIDATING`, blocked only on its recorded external technical review (see
+its entry below), which is not a dependency of any other milestone in
+this queue. As of this document, **`M-COM-V1` is the next eligible
+milestone** (`APPROVED_FOR_IMPLEMENTATION`, no unresolved dependency
+milestones in this queue, no pending external prerequisite gating entry
+into `IMPLEMENTING` — the external scope review named in its entry gates
+`APPROVED`/`MERGED`/`COMPLETE`, not eligibility to start). `M-IVT-1`
+remains `APPROVED_FOR_IMPLEMENTATION` (tooling scope) and queued after
+`M-COM-V1` under the intended serial execution order the selection
+algorithm enforces: with no entry currently `IMPLEMENTING` or holding its
+own open PR, `M-COM-V1` is the earliest-eligible entry the algorithm
+selects next; `M-IVT-1` becomes earliest-eligible only once `M-COM-V1` is
+no longer `APPROVED_FOR_IMPLEMENTATION`, and is not `IMPLEMENTING` or
+holding an open PR of its own.
 
 | milestone_id | Title | Current status | Depends on |
 |---|---|---|---|
-| `M-GPI-1` | Generic protocol integration (shared core + first transport) | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-GPI-1.md`](approvals/M-GPI-1.md)) |
-| `M-COM-V1` | Commerce-v1 profile implementation | `APPROVED_FOR_IMPLEMENTATION` | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved — gates `APPROVED`/`MERGED`/`COMPLETE`, not `IMPLEMENTING`; see entry below) |
-| `M-IVT-1` | Independent-validation tooling | `APPROVED_FOR_IMPLEMENTATION` (tooling scope; see note below) | design approval (recorded, [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)); tooling is independently buildable — see manifest entry |
-| `M-HFA-1` | Hidden-failure analysis tooling | `PROPOSED` | `M-IVT-1` bundle format; an executable integration |
-| `M-IET-1` | Improvement/retest evidence tooling | `PROPOSED` | `M-HFA-1` finding-record format |
+| `M-GPI-1` | Generic protocol integration (shared core + first transport) | `VALIDATING` (implementation merged via PR [#12](https://github.com/Harimay23/cav-bench/pull/12); external technical review outstanding) | design approval (recorded, [`approvals/M-GPI-1.md`](approvals/M-GPI-1.md)) |
+| `M-COM-V1` | Commerce-v1 profile implementation | `APPROVED_FOR_IMPLEMENTATION` — next eligible milestone | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved — gates `APPROVED`/`MERGED`/`COMPLETE`, not `IMPLEMENTING`; see entry below) |
+| `M-IVT-1` | Independent-validation tooling | `APPROVED_FOR_IMPLEMENTATION` (tooling scope; see note below) — queued after `M-COM-V1` | design approval (recorded, [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)); tooling is independently buildable — see manifest entry |
+| `M-HFA-1` | Hidden-failure analysis tooling | `PROPOSED` (not executable) | `M-IVT-1` bundle format; an executable integration |
+| `M-IET-1` | Improvement/retest evidence tooling | `PROPOSED` (not executable) | `M-HFA-1` finding-record format |
 | `M-REL-NEXT` | Versioned follow-up release | `PROPOSED` (effectively blocked) | approved, merged scope + external evidence |
 
 The LangGraph milestone (PR #6 design brief, PR #8 four-scenario runtime)
-is **not** in this queue: it predates this manifest, is in flight under
-its own PRs, and must not be modified by executors working this queue.
+is **not** in this queue: it predates this manifest. Both PR #6 and PR #8
+are now **merged** to `main`, and their implementation foundation is
+available for other code to build on; they remain outside this
+future-workstream queue because they predate it, and their historical
+branches (`feat/langgraph-adapter-skeleton`, `feat/langgraph-four-scenario-runtime`)
+must not be modified by executors working this queue.
 
 ---
 
@@ -74,14 +106,25 @@ its own PRs, and must not be modified by executors working this queue.
   topology and REST-first transport order; a `DECISION_LOG.md` entry at
   implementation time recording both remains required (per `AGENTS.md`
   scope discipline and approval Condition 1).
-- **current status:** `PR_OPEN` (transitioned
+- **current status:** `VALIDATING` (transitioned
   `APPROVED_FOR_IMPLEMENTATION` → `IMPLEMENTING` → `PR_OPEN` at execution
   journal `docs/program/journal/execution-journal.jsonl` checkpoints
-  `ckpt-0001`/`ckpt-0002`, branch `feat/generic-protocol-integration`,
-  base `origin/main` `7d55cc9666a403571f048ed3ca50aa309f8a977b`, draft PR
-  [#12](https://github.com/Harimay23/cav-bench/pull/12). Marking the PR
-  ready for review and merging remain human decisions per
-  `gate-state.md`; no further milestone work proceeds from this state.)
+  `ckpt-0001`–`ckpt-0010`, branch `feat/generic-protocol-integration`,
+  base `origin/main` `7d55cc9666a403571f048ed3ca50aa309f8a977b`; PR
+  [#12](https://github.com/Harimay23/cav-bench/pull/12) was marked ready
+  for review and merged by a human maintainer to `main` at merge commit
+  `dad87d045021fdc472e0ed7435d760e9c5db50b7`; tracking issue
+  [#11](https://github.com/Harimay23/cav-bench/issues/11) is closed as
+  implementation-completed. Per `gate-state.md`, `MERGED` transitions to
+  `VALIDATING` when completion evidence requires post-merge or external
+  validation — this entry's completion evidence includes the recorded
+  external technical review below, which has not occurred, so the
+  milestone stops at `VALIDATING` and does not advance to `COMPLETE`. No
+  further implementation work proceeds under `M-GPI-1` while it remains in
+  this state. Its pending external technical review does not block
+  selection of another independently eligible milestone in the queue.
+  Entering `COMPLETE` requires the recorded external technical review,
+  which must never be simulated or assumed.)
 - **allowed actions:** new optional-extra modules for the gateway core
   and first transport frontend; deterministic reference candidate client
   (examples-adjacent); CI example job; documentation; changelog +
@@ -130,7 +173,7 @@ its own PRs, and must not be modified by executors working this queue.
 - **design-approval record:** [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)
   (`approved_with_conditions`, reviewed commit
   `38c5e1e8590e17c2798618c0490db7958d7f739d`)
-- **issue placeholder:** `ISSUE-TBD-COM-V1` (open before implementation)
+- **issue:** [#13 — `[M-COM-V1] Implement commerce-v1 scenario pack (initial subset)`](https://github.com/Harimay23/cav-bench/issues/13) (open, approved for implementation)
 - **branch name (proposed):** `feat/commerce-v1-profile`
 - **PR title (proposed):** `feat: add commerce-v1 scenario pack (initial subset)`
 - **dependency milestones:** none in this queue (uses existing runtime);
@@ -138,7 +181,9 @@ its own PRs, and must not be modified by executors working this queue.
   design (Gate-2 scope validation) is an unresolved external prerequisite,
   but it **gates the approval/merge boundary, not eligibility to start**:
   see [Eligibility](#eligibility-com-v1) below.
-- **current status:** `APPROVED_FOR_IMPLEMENTATION` — eligible to enter
+- **current status:** `APPROVED_FOR_IMPLEMENTATION` — **the next eligible
+  milestone** in this queue (`M-GPI-1`'s implementation is merged and no
+  longer selectable; see the queue overview above), eligible to enter
   `IMPLEMENTING` now, against the approved proposed five-scenario working
   subset (approval Condition 2); not eligible to cross into `APPROVED` or
   `MERGED` until the external scope review is recorded (approval
@@ -191,7 +236,7 @@ its own PRs, and must not be modified by executors working this queue.
 - **design-approval record:** [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)
   (`approved_with_conditions`, reviewed commit
   `38c5e1e8590e17c2798618c0490db7958d7f739d` — **tooling scope only**)
-- **issue placeholder:** `ISSUE-TBD-IVT-1`
+- **issue:** [#14 — `[M-IVT-1] Build independent-validation run tooling and runner kit`](https://github.com/Harimay23/cav-bench/issues/14) (open, approved for implementation, tooling scope only)
 - **branch name (proposed):** `feat/independent-validation-tooling`
 - **PR title (proposed):** `feat: add independent-validation run tooling and runner kit`
 - **dependency milestones:** the *tooling* (manifest/attestation
@@ -243,7 +288,7 @@ its own PRs, and must not be modified by executors working this queue.
 - **milestone_id:** `M-HFA-1`
 - **title:** Build the evidence correlator, classifier, and finding-record tooling
 - **design document:** [`../design/hidden-failure-discovery.md`](../design/hidden-failure-discovery.md)
-- **issue placeholder:** `ISSUE-TBD-HFA-1`
+- **issue:** [#15 — `[M-HFA-1] Build hidden-failure evidence correlation and finding tooling`](https://github.com/Harimay23/cav-bench/issues/15) (open, tracking only — proposed, not executable; no approval recorded)
 - **branch name (proposed):** `feat/hidden-failure-analysis`
 - **PR title (proposed):** `feat: add hidden-failure evidence correlation and finding tooling`
 - **dependency milestones:** `M-IVT-1` (reuses the bundle format and
@@ -289,7 +334,7 @@ its own PRs, and must not be modified by executors working this queue.
 - **milestone_id:** `M-IET-1`
 - **title:** Build the baseline-freeze, comparison, and case-study evidence tooling
 - **design document:** [`../design/improvement-case-study.md`](../design/improvement-case-study.md)
-- **issue placeholder:** `ISSUE-TBD-IET-1`
+- **issue:** [#16 — `[M-IET-1] Build before-and-after comparison and case-study evidence tooling`](https://github.com/Harimay23/cav-bench/issues/16) (open, tracking only — proposed, not executable; no approval recorded)
 - **branch name (proposed):** `feat/improvement-evidence-tooling`
 - **PR title (proposed):** `feat: add before-and-after comparison and case-study evidence tooling`
 - **dependency milestones:** `M-HFA-1` (consumes finding records).
@@ -327,7 +372,7 @@ its own PRs, and must not be modified by executors working this queue.
 - **milestone_id:** `M-REL-NEXT`
 - **title:** Prepare and publish the versioned follow-up release
 - **design document:** [`../design/follow-up-release.md`](../design/follow-up-release.md)
-- **issue placeholder:** `ISSUE-TBD-REL-NEXT`
+- **issue:** [#17 — `[M-REL-NEXT] Prepare and publish the versioned follow-up release`](https://github.com/Harimay23/cav-bench/issues/17) (open, tracking only — proposed and effectively blocked; no approval recorded)
 - **branch name (proposed):** `release/follow-up-version` (RC branch at
   freeze; checklist/template work may land earlier via `docs/` or
   `chore/` branches).

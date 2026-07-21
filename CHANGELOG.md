@@ -184,6 +184,24 @@ and this project uses schema-versioned scenario/trace/evaluation contracts
 
 ### Documentation
 
+- Reconciled program-status documentation
+  (`docs/program/implementation-manifest.md`,
+  `docs/program/implementation-issue-specifications.md`,
+  `docs/program/approvals/README.md`,
+  `docs/design/future-workstreams-index.md`, `README.md`) with the actual
+  merged repository state: PR #6, #8, #9, #10, and #12 are merged; issue
+  #11 (`M-GPI-1`) is closed as implementation-completed, with its
+  recorded external technical review still outstanding, so the milestone
+  moves from a stale `PR_OPEN` manifest entry to the correct
+  `VALIDATING` gate-state; `M-COM-V1` (issue #13) is recorded as the next
+  eligible milestone; `M-IVT-1` (issue #14) remains queued after it;
+  `M-HFA-1`/`M-IET-1`/`M-REL-NEXT` (issues #15/#16/#17) remain unapproved
+  and not executable. Replaced stale `ISSUE-TBD-*` placeholders with the
+  real issue links. Appended execution-journal checkpoints recording the
+  reconciliation; no prior journal entry was edited, reordered, or
+  removed. Documentation and governance only: no evaluator, runtime,
+  scenario, schema, dependency, or CI behavior changed, and no
+  implementation work began under this change.
 - Rewrote `docs/langgraph-adapter-mapping.md` to distinguish design decisions inherited from the merged PR #6 baseline from implemented runtime behavior, and to document authority evidence, state-read vs. commit-time revalidation, attempted-vs-committed evidence, reconciliation behavior, identifier derivation, synchronous durability, fixture limitations, local-vs-CI validation, and installation/minimal-execution instructions. No official LangChain/LangGraph support, endorsement, adoption, certification, or validation is claimed.
 - Added a draft LangGraph adapter mapping, a non-executable
   `ExecutionAdapter`-shaped skeleton, and contract tests covering

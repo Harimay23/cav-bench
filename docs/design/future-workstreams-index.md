@@ -17,12 +17,20 @@ conditions`; the remaining three (`hidden-failure-discovery.md`,
 `improvement-case-study.md`, `follow-up-release.md`) remain `Status:
 Proposed`, with no approval record and no implementation authorized. See
 [Design approvals](#design-approvals) below for the current record set.
-No implementation has occurred under any approval recorded so far.
+Implementation has occurred and merged for `M-GPI-1` (PR
+[#12](https://github.com/Harimay23/cav-bench/pull/12), tracking issue
+[#11](https://github.com/Harimay23/cav-bench/issues/11) closed); it
+remains at the `VALIDATING` gate-state pending its recorded external
+technical review — see
+[`../program/implementation-manifest.md`](../program/implementation-manifest.md)
+for the authoritative, current status of every milestone. No
+implementation has occurred under the `M-COM-V1` or `M-IVT-1` approvals.
 
 The package designs future work for the current 90-day program
-(`../strategy/90-day-engineering-program.md`) beyond the in-flight
-LangGraph milestone (PR #6 design brief, PR #8 four-scenario runtime,
-which remain separate, unmerged, and unmodified by this package).
+(`../strategy/90-day-engineering-program.md`) beyond the LangGraph
+milestone (PR #6 design brief, PR #8 four-scenario runtime), which are
+now both merged to `main` and remain separate from, and unmodified by,
+this package.
 
 ## Workstream designs
 

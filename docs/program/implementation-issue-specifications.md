@@ -1,24 +1,39 @@
 # Implementation Issue Specifications
 
-Status: Recorded — not yet filed
+Status: Recorded — historical pre-filing specification
 
-This document contains **ready-to-create GitHub issue specifications**
-for the six future-workstream implementation milestones. No GitHub issue
-is created by this document or by the pull request that carries it, per
-repository practice for this documentation package. These specifications
-are intended to be used, one at a time, to open real GitHub issues after
-this approval PR merges — each issue mirrors the corresponding entry in
+This document originally contained **ready-to-create GitHub issue
+specifications** for the six future-workstream implementation milestones,
+authored before any of the corresponding issues existed. The
+specification text below is preserved as originally written (a
+pre-filing template) and is not rewritten to describe current issue
+state; the up-to-date, authoritative status for every milestone lives in
 [`implementation-manifest.md`](implementation-manifest.md).
 
-Only the first three specifications (`M-GPI-1`, `M-COM-V1`, `M-IVT-1`) are
-marked **approved for implementation**, reflecting the recorded design
-approvals in [`approvals/`](approvals/). The last three (`M-HFA-1`,
-`M-IET-1`, `M-REL-NEXT`) are marked **proposed / not executable** and must
-not be treated as authorizing any implementation work.
+## Filing status (as of this reconciliation, 2026-07-20)
 
-Opening any of these issues does not, by itself, authorize implementation
-beyond what the corresponding design-approval record and manifest entry
-already permit; the issue is a tracking artifact, not a new authorization.
+All six specifications below have since been used to open real GitHub
+issues. Opening an issue did not, by itself, authorize implementation
+beyond what each milestone's design-approval record and manifest entry
+already permit — the issue is a tracking artifact, not a new
+authorization; the manifest remains the sole authority on what is
+selectable for execution.
+
+| Milestone | Spec § | Issue | State |
+|---|---|---|---|
+| `M-GPI-1` | [§1](#1-m-gpi-1--generic-protocol-integration) | [#11](https://github.com/Harimay23/cav-bench/issues/11) | Closed — implementation completed (PR [#12](https://github.com/Harimay23/cav-bench/pull/12) merged); external technical review still pending |
+| `M-COM-V1` | [§2](#2-m-com-v1--commerce-v1-profile-implementation) | [#13](https://github.com/Harimay23/cav-bench/issues/13) | Open — approved for implementation, next eligible milestone |
+| `M-IVT-1` | [§3](#3-m-ivt-1--independent-validation-tooling) | [#14](https://github.com/Harimay23/cav-bench/issues/14) | Open — approved for implementation (tooling scope), queued after `M-COM-V1` |
+| `M-HFA-1` | [§4](#4-m-hfa-1--hidden-failure-analysis-tooling) | [#15](https://github.com/Harimay23/cav-bench/issues/15) | Open — tracking only; proposed, not executable |
+| `M-IET-1` | [§5](#5-m-iet-1--improvementretest-evidence-tooling) | [#16](https://github.com/Harimay23/cav-bench/issues/16) | Open — tracking only; proposed, not executable |
+| `M-REL-NEXT` | [§6](#6-m-rel-next--versioned-follow-up-release) | [#17](https://github.com/Harimay23/cav-bench/issues/17) | Open — tracking only; proposed, effectively blocked |
+
+The pre-filing specification text below (§1–§6, including its original
+"not yet filed" framing, "Status: Approved for implementation" /
+"Status: Proposed / not executable" per-milestone labels, and "This file
+will be used, after this approval PR merges..." closing note) is left
+unedited as the historical record of what was specified before filing.
+It should be read alongside the table above, not as a live status feed.
 
 ---
 
