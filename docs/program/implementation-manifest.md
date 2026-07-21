@@ -120,9 +120,11 @@ must not be modified by executors working this queue.
   validation — this entry's completion evidence includes the recorded
   external technical review below, which has not occurred, so the
   milestone stops at `VALIDATING` and does not advance to `COMPLETE`. No
-  further milestone work proceeds from this state; entering `COMPLETE`
-  requires the recorded external technical review, which must never be
-  simulated or assumed.)
+  further implementation work proceeds under `M-GPI-1` while it remains in
+  this state. Its pending external technical review does not block
+  selection of another independently eligible milestone in the queue.
+  Entering `COMPLETE` requires the recorded external technical review,
+  which must never be simulated or assumed.)
 - **allowed actions:** new optional-extra modules for the gateway core
   and first transport frontend; deterministic reference candidate client
   (examples-adjacent); CI example job; documentation; changelog +
