@@ -35,26 +35,31 @@ index lists every approval record currently on file.
 ## Approved records
 
 Listed in intended implementation order (see
-[`../implementation-manifest.md`](../implementation-manifest.md)):
-`M-GPI-1` is currently the first eligible milestone.
+[`../implementation-manifest.md`](../implementation-manifest.md), the
+authoritative source for current execution status — the "Current
+execution status" column below is a summary, not a second independent
+tracker). As of this reconciliation, `M-GPI-1`'s implementation is merged
+and it sits at `VALIDATING`; `M-COM-V1` is the next eligible milestone.
 
 | Milestone | Design | Decision | Reviewed commit | Conditions summary | Current execution status |
 |---|---|---|---|---|---|
-| [`M-GPI-1`](M-GPI-1.md) | [Generic MCP or REST integration](../../design/generic-protocol-integration.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | DECISION_LOG entry required at implementation; no MCP transport in this milestone; no new evaluator/commit-path/schema surface; stop if evaluator/core/schema changes needed. | `APPROVED_FOR_IMPLEMENTATION` — not started; first eligible milestone. |
-| [`M-COM-V1`](M-COM-V1.md) | [Commerce-v1 consequential-action profile](../../design/commerce-v1-profile.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Final scenario subset still subject to external scope review — this **gates the approval/merge/complete transitions, not the start of implementation**: the milestone is eligible to enter `IMPLEMENTING` now against the approved proposed 5-scenario working subset, but cannot reach `APPROVED`/`MERGED`/`COMPLETE` until the external scope review is recorded, and the implementation PR may need amendment (dropping, replacing, or narrowing a scenario) once that review lands; no `core-v1`/schema/evaluator/runtime changes; commerce remains an applied profile, not CAV-Bench's identity. | `APPROVED_FOR_IMPLEMENTATION` — not started; eligible to start, blocked from merge/completion pending external scope review. |
-| [`M-IVT-1`](M-IVT-1.md) | [Independent external validation run](../../design/independent-validation-run.md) (tooling scope) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Tooling and maintainer dry run only; dry run always classified `project_self_run`; no claim of external run, adoption, or endorsement; non-recursive integrity model preserved exactly. | `APPROVED_FOR_IMPLEMENTATION` — not started. |
+| [`M-GPI-1`](M-GPI-1.md) | [Generic MCP or REST integration](../../design/generic-protocol-integration.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | DECISION_LOG entry required at implementation; no MCP transport in this milestone; no new evaluator/commit-path/schema surface; stop if evaluator/core/schema changes needed. | `VALIDATING` — implementation merged (PR [#12](https://github.com/Harimay23/cav-bench/pull/12), issue [#11](https://github.com/Harimay23/cav-bench/issues/11) closed); recorded external technical review still outstanding. |
+| [`M-COM-V1`](M-COM-V1.md) | [Commerce-v1 consequential-action profile](../../design/commerce-v1-profile.md) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Final scenario subset still subject to external scope review — this **gates the approval/merge/complete transitions, not the start of implementation**: the milestone is eligible to enter `IMPLEMENTING` now against the approved proposed 5-scenario working subset, but cannot reach `APPROVED`/`MERGED`/`COMPLETE` until the external scope review is recorded, and the implementation PR may need amendment (dropping, replacing, or narrowing a scenario) once that review lands; no `core-v1`/schema/evaluator/runtime changes; commerce remains an applied profile, not CAV-Bench's identity. | `APPROVED_FOR_IMPLEMENTATION` — not started; next eligible milestone (issue [#13](https://github.com/Harimay23/cav-bench/issues/13)); blocked from merge/completion pending external scope review. |
+| [`M-IVT-1`](M-IVT-1.md) | [Independent external validation run](../../design/independent-validation-run.md) (tooling scope) | `approved_with_conditions` | `38c5e1e8590e17c2798618c0490db7958d7f739d` | Tooling and maintainer dry run only; dry run always classified `project_self_run`; no claim of external run, adoption, or endorsement; non-recursive integrity model preserved exactly. | `APPROVED_FOR_IMPLEMENTATION` — not started; queued after `M-COM-V1` (issue [#14](https://github.com/Harimay23/cav-bench/issues/14)). |
 
 ## Not approved
 
 The following designs remain `Status: Proposed` and have **no** approval
-record in this directory. They must not be treated as eligible for
-implementation:
+record in this directory. Each has an open GitHub tracking issue, opened
+per `docs/program/implementation-issue-specifications.md`; opening a
+tracking issue does not approve or authorize implementation. They must
+not be treated as eligible for implementation:
 
-| Milestone | Design | Why unapproved |
-|---|---|---|
-| `M-HFA-1` | [Hidden-failure discovery](../../design/hidden-failure-discovery.md) | Depends on `M-IVT-1`'s bundle format and a real executable integration; not yet reviewed for approval. |
-| `M-IET-1` | [Before-and-after improvement case](../../design/improvement-case-study.md) | Depends on `M-HFA-1`'s finding-record format; not yet reviewed for approval. |
-| `M-REL-NEXT` | [Versioned follow-up release](../../design/follow-up-release.md) | Depends on merged, gate-complete scope from every milestone it will contain, plus the external evidence its claims will cite; effectively blocked. |
+| Milestone | Design | Tracking issue | Why unapproved |
+|---|---|---|---|
+| `M-HFA-1` | [Hidden-failure discovery](../../design/hidden-failure-discovery.md) | [#15](https://github.com/Harimay23/cav-bench/issues/15) (open, not executable) | Depends on `M-IVT-1`'s bundle format and a real executable integration; not yet reviewed for approval. |
+| `M-IET-1` | [Before-and-after improvement case](../../design/improvement-case-study.md) | [#16](https://github.com/Harimay23/cav-bench/issues/16) (open, not executable) | Depends on `M-HFA-1`'s finding-record format; not yet reviewed for approval. |
+| `M-REL-NEXT` | [Versioned follow-up release](../../design/follow-up-release.md) | [#17](https://github.com/Harimay23/cav-bench/issues/17) (open, blocked) | Depends on merged, gate-complete scope from every milestone it will contain, plus the external evidence its claims will cite; effectively blocked. |
 
 ## Adding a new record
 
