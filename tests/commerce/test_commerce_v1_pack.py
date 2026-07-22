@@ -27,6 +27,7 @@ EXPECTED_IDS = (
     "CM-PAY-02",
     "CM-PAY-90",
     "CM-PRC-02",
+    "CM-PRC-90",
     "CM-REC-01",
 )
 
@@ -36,7 +37,7 @@ def test_pack_identity_and_membership() -> None:
     assert PACK.pack_version == "0.1.0"
     assert PACK.schema_version == "1.0"
     assert PACK.scenario_ids == EXPECTED_IDS
-    assert len(PACK) == 8
+    assert len(PACK) == 9
 
 
 def test_pack_version_is_independent_of_core_package() -> None:

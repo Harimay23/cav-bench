@@ -23,14 +23,14 @@ from tests.helpers import evaluate
 PACK = load_builtin_pack("commerce-v1")
 
 HAZARDS = ("CM-ORD-01", "CM-INV-01", "CM-PRC-02", "CM-PAY-02", "CM-REC-01")
-CONTROLS = ("CM-ORD-90", "CM-INV-90", "CM-PAY-90")
+CONTROLS = ("CM-ORD-90", "CM-INV-90", "CM-PAY-90", "CM-PRC-90")
 
-# Aggregate ablation table (commerce-v1 only).
+# Aggregate ablation table (commerce-v1 only): 5 hazards + 4 controls = 9.
 EXPECTED_OVERALL = {
-    "direct": {"OSR": 1.0, "PAOSR": 0.875, "CVSR": 0.375, "VG": 0.625},
-    "policy_gated": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 0.5, "VG": 0.5},
-    "commit_guarded": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 0.75, "VG": 0.25},
-    "reconciled": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 0.875, "VG": 0.125},
+    "direct": {"OSR": 1.0, "PAOSR": 0.8889, "CVSR": 0.4444, "VG": 0.5556},
+    "policy_gated": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 0.5556, "VG": 0.4444},
+    "commit_guarded": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 0.7778, "VG": 0.2222},
+    "reconciled": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 0.8889, "VG": 0.1111},
     "full_lifecycle": {"OSR": 1.0, "PAOSR": 1.0, "CVSR": 1.0, "VG": 0.0},
 }
 
@@ -46,6 +46,7 @@ EXPECTED_CVS = {
     "CM-ORD-90": (True, True, True, True, True),
     "CM-INV-90": (True, True, True, True, True),
     "CM-PAY-90": (True, True, True, True, True),
+    "CM-PRC-90": (True, True, True, True, True),
 }
 
 # The domain (CMF-*) or mechanical code that must surface for the flawed
@@ -105,6 +106,36 @@ def test_commerce_v1_flawed_run_surfaces_domain_code() -> None:
     for hazard, code in EXPECTED_DIRECT_CODE.items():
         result = evaluate(PACK.get(hazard), BASELINE_PROFILES["direct"])
         assert code in result.failure_codes, (hazard, result.failure_codes)
+
+
+def test_cm_prc_02_independently_evidences_both_declared_dimensions() -> None:
+    # Review correction: CM-PRC-02 declares intent_grounding AND
+    # authority_validity; both must be mechanically exercised, not merely
+    # listed in dimension_focus. On the flawed run both fail from
+    # benchmark-owned state (committed discount exceeds the delegated
+    # authority); on the gated run both hold.
+    flawed = evaluate(PACK.get("CM-PRC-02"), BASELINE_PROFILES["direct"])
+    assert flawed.dimensions["intent_grounding"] == "fail"
+    assert flawed.dimensions["authority_validity"] == "fail"
+    assert flawed.commit_valid_success is False
+    assert flawed.policy_aware_outcome_success is False  # authority/intent failure
+    for guarded in ("policy_gated", "commit_guarded", "reconciled", "full_lifecycle"):
+        result = evaluate(PACK.get("CM-PRC-02"), BASELINE_PROFILES[guarded])
+        assert result.dimensions["intent_grounding"] == "pass", guarded
+        assert result.dimensions["authority_validity"] == "pass", guarded
+        assert result.commit_valid_success is True, guarded
+
+
+def test_cm_prc_90_is_the_pricing_control_and_is_commit_valid_everywhere() -> None:
+    # The dedicated pricing/intent-authority control for C-06: the same
+    # apply_discount mechanic within the delegated limit, commit-valid on
+    # every profile with no dimension failing.
+    scn = PACK.get("CM-PRC-90")
+    assert scn.family == "stable_happy_path"
+    for profile_name in CANONICAL_PROFILE_ORDER:
+        result = evaluate(scn, BASELINE_PROFILES[profile_name])
+        assert result.commit_valid_success is True, profile_name
+        assert all(status != "fail" for status in result.dimensions.values()), profile_name
 
 
 def test_commerce_v1_ablation_is_deterministic() -> None:
