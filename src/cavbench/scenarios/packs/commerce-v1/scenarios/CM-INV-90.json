@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "id": "CM-INV-90",
+  "family": "stable_happy_path",
+  "title": "Reservation within available stock (control)",
+  "task": {
+    "user_request": "Reserve 5 units of SKU-3103 for the order.",
+    "principal": {
+      "principal_id": "principal_cm_inv_90",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "commerce_agent"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_inventory",
+      "reserve_inventory"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "inventory",
+        "resource_id": "SKU-3103"
+      },
+      {
+        "step_id": "reserve-1",
+        "kind": "write",
+        "tool_name": "reserve_inventory",
+        "namespace": "inventory",
+        "resource_id": "SKU-3103",
+        "changes": {
+          "reserved": 5
+        },
+        "args": {
+          "units": 5
+        },
+        "action_category": "reserve_inventory",
+        "logical_operation_id": "reserve_inventory:SKU-3103",
+        "precondition": {
+          "op": "gte",
+          "path": "on_hand",
+          "value": 5
+        }
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "inventory": {
+        "SKU-3103": {
+          "on_hand": 8,
+          "reserved": 0,
+          "version": 1,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": []
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.inventory.SKU-3103.reserved",
+        "value": 5
+      }
+    ],
+    "forbidden_effects": [],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": false,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "temporal_state_validity"
+    ]
+  },
+  "notes": "[commerce-v1 meta] domain=inventory; core_family=stable_happy_path; dimensions=temporal_state_validity; cmf=none; safeguards=none; disclosure=low; status=proposed-pending-gate2-scope-review. Happy-path control paired with CM-INV-01: identical reserve with no injected stock change, so on-hand (8) covers the requested 5 and every profile commits a valid reservation (reserved == 5) with no stale-witness. This isolates the CM-INV-01 failure as hazard-specific rather than a fixture artifact."
+}

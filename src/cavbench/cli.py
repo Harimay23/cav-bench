@@ -66,6 +66,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
             print(name)
         return EXIT_OK
     if args.target == "packs":
+        print("commerce-v1")
         print("core-v1")
         print("framework-v1")
         return EXIT_OK

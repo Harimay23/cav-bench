@@ -1,0 +1,16 @@
+{
+  "pack_id": "commerce-v1",
+  "pack_version": "0.1.0",
+  "schema_version": "1.0",
+  "description": "commerce-v1 applied-profile pack (proposed initial subset, pending Gate-2 external scope review). Five synthetic consequential-commerce hazard scenarios spanning all five validity dimensions and three core hazard families -- CM-ORD-01 duplicate order, CM-INV-01 stale stock, CM-PRC-02 discount beyond delegated limit, CM-PAY-02 capture after authorization void, CM-REC-01 divergent partial cancellation -- plus three stable_happy_path controls. Loads through the existing pack loader with no schema, evaluator, runtime, adapter, or core-v1 change. Commerce is the first applied profile, not CAV-Bench's identity or exclusive scope. Fixtures are synthetic: no real merchant incidents, no real payment integration, no PII.",
+  "scenario_ids": [
+    "CM-INV-01",
+    "CM-INV-90",
+    "CM-ORD-01",
+    "CM-ORD-90",
+    "CM-PAY-02",
+    "CM-PAY-90",
+    "CM-PRC-02",
+    "CM-REC-01"
+  ]
+}
