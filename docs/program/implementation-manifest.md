@@ -72,7 +72,7 @@ holding an open PR of its own.
 | milestone_id | Title | Current status | Depends on |
 |---|---|---|---|
 | `M-GPI-1` | Generic protocol integration (shared core + first transport) | `VALIDATING` (implementation merged via PR [#12](https://github.com/Harimay23/cav-bench/pull/12); external technical review outstanding) | design approval (recorded, [`approvals/M-GPI-1.md`](approvals/M-GPI-1.md)) |
-| `M-COM-V1` | Commerce-v1 profile implementation | `APPROVED_FOR_IMPLEMENTATION` — next eligible milestone | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved — gates `APPROVED`/`MERGED`/`COMPLETE`, not `IMPLEMENTING`; see entry below) |
+| `M-COM-V1` | Commerce-v1 profile implementation | `PR_OPEN` (draft PR [#19](https://github.com/Harimay23/cav-bench/pull/19), branch `feat/commerce-v1-profile`; full local validation complete) | design approval (recorded, [`approvals/M-COM-V1.md`](approvals/M-COM-V1.md)); external scope review (unresolved — gates `APPROVED`/`MERGED`/`COMPLETE`, not `PR_OPEN`; see entry below) |
 | `M-IVT-1` | Independent-validation tooling | `APPROVED_FOR_IMPLEMENTATION` (tooling scope; see note below) — queued after `M-COM-V1` | design approval (recorded, [`approvals/M-IVT-1.md`](approvals/M-IVT-1.md)); tooling is independently buildable — see manifest entry |
 | `M-HFA-1` | Hidden-failure analysis tooling | `PROPOSED` (not executable) | `M-IVT-1` bundle format; an executable integration |
 | `M-IET-1` | Improvement/retest evidence tooling | `PROPOSED` (not executable) | `M-HFA-1` finding-record format |
@@ -181,13 +181,24 @@ must not be modified by executors working this queue.
   design (Gate-2 scope validation) is an unresolved external prerequisite,
   but it **gates the approval/merge boundary, not eligibility to start**:
   see [Eligibility](#eligibility-com-v1) below.
-- **current status:** `APPROVED_FOR_IMPLEMENTATION` — **the next eligible
-  milestone** in this queue (`M-GPI-1`'s implementation is merged and no
-  longer selectable; see the queue overview above), eligible to enter
-  `IMPLEMENTING` now, against the approved proposed five-scenario working
-  subset (approval Condition 2); not eligible to cross into `APPROVED` or
-  `MERGED` until the external scope review is recorded (approval
-  Condition 1).
+- **current status:** `PR_OPEN` (transitioned
+  `APPROVED_FOR_IMPLEMENTATION` → `IMPLEMENTING` → `PR_OPEN` at execution
+  journal [`journal/execution-journal.jsonl`](journal/execution-journal.jsonl)
+  checkpoints `ckpt-0012`–`ckpt-0016`, branch `feat/commerce-v1-profile`,
+  base `origin/main` `0e818a00517384241357b08354596ed7462872bf`; draft PR
+  [#19](https://github.com/Harimay23/cav-bench/pull/19), opened as **draft**
+  and unmerged). The pack, the adoption-facing control-mapping
+  documentation, and the commerce-v1-only golden ablation pass the full
+  local quality gate (`pytest` 595 passed / 1 optional-extra skip, `ruff`,
+  `mypy`, `python -m build`, `git diff --check`), with `commerce-v1`
+  validate/ablate deterministic (byte-identical reruns) and all `core-v1`
+  goldens and prohibited surfaces byte-identical (`ckpt-0013`–`ckpt-0014`).
+  Implemented against the approved proposed five-scenario working subset
+  (approval Condition 2), with its proposed/pending-review status preserved
+  throughout. **Not eligible to cross into `AWAITING_REVIEW → APPROVED` or
+  `MERGED` until the external scope review (Gate-2 scope validation) is
+  recorded** (approval Condition 1); the draft PR must not be marked ready,
+  approved, or merged, and Issue #13 must not be closed, before that.
 - **allowed actions:** create pack files under
   `src/cavbench/scenarios/packs/commerce-v1/`; profile documentation;
   pack-specific tests and golden expectations; changelog entry.

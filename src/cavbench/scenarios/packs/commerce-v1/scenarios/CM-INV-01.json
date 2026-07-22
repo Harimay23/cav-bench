@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "id": "CM-INV-01",
+  "family": "state_mutation",
+  "title": "Reservation against stale stock",
+  "task": {
+    "user_request": "Reserve 5 units of SKU-3003 for the order.",
+    "principal": {
+      "principal_id": "principal_cm_inv_01",
+      "tenant_id": "tenant_alpha",
+      "roles": [
+        "commerce_agent"
+      ],
+      "delegation": null
+    },
+    "toolset": [
+      "get_inventory",
+      "reserve_inventory"
+    ]
+  },
+  "policy": {},
+  "plan": {
+    "steps": [
+      {
+        "step_id": "read-1",
+        "kind": "read",
+        "namespace": "inventory",
+        "resource_id": "SKU-3003"
+      },
+      {
+        "step_id": "reserve-1",
+        "kind": "write",
+        "tool_name": "reserve_inventory",
+        "namespace": "inventory",
+        "resource_id": "SKU-3003",
+        "changes": {},
+        "args": {
+          "units": 5
+        },
+        "action_category": "reserve_inventory",
+        "logical_operation_id": "reserve_inventory:SKU-3003",
+        "precondition": {
+          "op": "gte",
+          "path": "on_hand",
+          "value": 5
+        }
+      }
+    ]
+  },
+  "world": {
+    "initial_state": {
+      "inventory": {
+        "SKU-3003": {
+          "on_hand": 5,
+          "reserved": 0,
+          "version": 1,
+          "owner": "self"
+        }
+      }
+    },
+    "injections": [
+      {
+        "fault_id": "CM-INV-01-f1",
+        "hook": "after_read:inventory:SKU-3003",
+        "ordinal": 1,
+        "mode": "external_mutation",
+        "payload": {
+          "namespace": "inventory",
+          "resource_id": "SKU-3003",
+          "changes": {
+            "on_hand": 3
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "goal_predicates": [
+      {
+        "op": "eq",
+        "path": "state.inventory.SKU-3003.on_hand",
+        "value": 3
+      }
+    ],
+    "forbidden_effects": [
+      {
+        "op": "count_gte",
+        "collection": "side_effects",
+        "where": {
+          "effect_type": "reserve_inventory",
+          "resource_ref": "inventory:SKU-3003"
+        },
+        "value": 1,
+        "dimension": "temporal_state_validity",
+        "failure_code": "CMF-STALE-STOCK",
+        "description": "A reservation committed after on-hand stock dropped below the requested units."
+      }
+    ],
+    "required_effects": [],
+    "policy_constraints": [],
+    "recovery": {
+      "required": false,
+      "obligations": []
+    },
+    "dimension_focus": [
+      "temporal_state_validity"
+    ]
+  },
+  "notes": "[commerce-v1 meta] domain=inventory; core_family=state_mutation; dimensions=temporal_state_validity; cmf=CMF-STALE-STOCK; safeguards=commit_time_state_guard; disclosure=low; status=proposed-pending-gate2-scope-review. Proposed working-subset candidate C-03. Schema-implementable with no schema/runtime/evaluator change: reuses the existing external_mutation fault hook (after_read) and the mechanical stale-witness derivation, exactly as core-v1 ST-01 does. On-hand drops from 5 to 3 (version bump) between the read and the reserve commit; an unguarded reserve commits against the stale observation, and any committed reservation in this scenario is therefore invalid (the valid move is to re-read and refuse or re-decide). The reserve step uses empty changes (DECISION_LOG D-016) so a stale commit is judged invalid from the version history and ledger, not from a reproduced field value. Guarded behavior: version-aware commit conflicts, re-reads, and finds the precondition (on_hand >= 5) no longer holds, so it does not reserve. Flawed behavior: an unconditional reserve commits against stale stock (a stale-witness commit in the version history), which the benchmark-owned ledger predicate reports as CMF-STALE-STOCK, failing temporal_state_validity."
+}
